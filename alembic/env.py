@@ -9,9 +9,7 @@ from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-
 load_dotenv()
-
 
 config = context.config
 
@@ -30,6 +28,11 @@ def get_url():
 config.set_main_option("sqlalchemy.url", get_url())
 
 from app.core.database import Base
+
+from app.models.user import User
+from app.models.post import Post 
+from app.models.todo import Todo
+
 target_metadata = Base.metadata
 
 def run_migrations_offline():
@@ -45,7 +48,6 @@ def run_migrations_offline():
         context.run_migrations()
 
 def run_migrations_online():
-    # engine_from_config orqali ulanishni yaratamiz
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

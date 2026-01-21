@@ -1,11 +1,12 @@
-from pydantic import BaseModel, EmailStr
+
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
 
 class UserCreate(BaseModel):
     email: EmailStr
     username: str
-    password: str
+    password: str = Field(min_length=6, max_length=100)
 
 class UserOut(BaseModel):
     id: int
@@ -22,3 +23,9 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
