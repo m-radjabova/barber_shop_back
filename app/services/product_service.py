@@ -144,8 +144,6 @@ def get_product_reviews(db: Session, product_id: str):
         .all()
     )
 
-
-
 def create_review(
     db: Session,
     product_id: str,
@@ -155,17 +153,6 @@ def create_review(
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-
-    exists = (
-        db.query(Review)
-        .filter(
-            Review.product_id == product_id,
-            Review.user_id == user_id
-        )
-        .first()
-    )
-    if exists:
-        raise HTTPException(status_code=400, detail="You already reviewed this product")
 
     review = Review(
         title=data.title,
