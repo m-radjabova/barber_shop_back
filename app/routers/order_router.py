@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -59,3 +59,19 @@ def all_order_products(
     user=Depends(require_roles("admin", "chef", "waiter")),
 ):
     return order_service.get_all_order_products(db)
+
+@router.get("/admin/dashboard")
+def admin_dashboard(
+    range: str = Query("week", pattern="^(week|month|year)$"),
+    db: Session = Depends(get_db),
+):
+    kpis = order_service.get_dashboard_kpis(db, range)
+    products = order_service.get_product_stats(db, range)
+
+    return {
+        "range": range,
+        "kpis": kpis,
+        "product_revenue": products,     
+        "products_list": products[:10], 
+        "total": kpis["total_revenue"],
+    }

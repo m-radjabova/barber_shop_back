@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
-from app.schemas.product import ProductCreate, ProductUpdate, ProductOut, ReviewCreate, ReviewOut, ReviewOut
+from app.schemas.product import PaginatedResponse, ProductCreate, ProductUpdate, ProductOut, ReviewCreate, ReviewOut, ReviewOut
 from app.services import product_service
 from app.dependencies.roles import require_admin
 
@@ -42,13 +42,19 @@ def add_review(
 ):
     return product_service.create_review(db, product_id, user.id, data)
 
-
-@router.get("/", response_model=list[ProductOut])
+@router.get("/", response_model=PaginatedResponse[ProductOut])
 def list_products(
     category_id: int | None = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return product_service.get_products(db, category_id=category_id)
+    return product_service.get_products_paginated(
+        db,
+        category_id=category_id,
+        page=page,
+        limit=limit,
+    )
 
 @router.get("/{product_id}", response_model=ProductOut)
 def get_product(product_id: str, db: Session = Depends(get_db)):

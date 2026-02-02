@@ -1,3 +1,4 @@
+import math
 import os
 import uuid
 from fastapi import HTTPException, UploadFile
@@ -24,6 +25,55 @@ def save_image(image: UploadFile) -> str:
         f.write(image.file.read())
 
     return f"/static/uploads/products/{filename}"
+
+def get_products_paginated(
+    db: Session,
+    category_id: int | None = None,
+    page: int = 1,
+    limit: int = 10,
+):
+    if page < 1:
+        raise HTTPException(status_code=400, detail="page must be >= 1")
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+
+    base_filter = []
+    if category_id is not None:
+        base_filter.append(Product.category_id == category_id)
+
+    total = db.query(func.count(Product.id)).filter(*base_filter).scalar() or 0
+    pages = math.ceil(total / limit) if total > 0 else 1
+
+    offset = (page - 1) * limit
+
+    q = (
+        db.query(
+            Product,
+            func.coalesce(func.avg(Review.rating), 0).label("avg_rating"),
+            func.count(Review.id).label("rating_count"),
+        )
+        .outerjoin(Review, Review.product_id == Product.id)
+        .filter(*base_filter)
+        .group_by(Product.id)
+        .order_by(Product.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+
+    rows = q.all()
+
+    items = [
+        _product_to_out(product, avg_rating, rating_count)
+        for product, avg_rating, rating_count in rows
+    ]
+
+    return {
+        "items": items,
+        "total": int(total),
+        "page": int(page),
+        "limit": int(limit),
+        "pages": int(pages),
+    }
 
 
 def _product_to_out(product: Product, avg_rating: float, rating_count: int) -> dict:

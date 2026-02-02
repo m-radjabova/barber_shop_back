@@ -48,3 +48,15 @@ class ReviewOut(BaseModel):
 class ReviewCreate(BaseModel):
     title: str = Field(..., max_length=255)
     rating: int = Field(..., ge=1, le=5)
+
+from pydantic import BaseModel
+from typing import Generic, TypeVar, List
+
+T = TypeVar("T")
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    limit: int
+    pages: int
