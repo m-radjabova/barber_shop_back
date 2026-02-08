@@ -32,7 +32,7 @@ def save_image(image: UploadFile) -> str:
 
     try:
         with open(path, "wb") as f:
-            shutil.copyfileobj(image.file, f)  # ✅ stream qilib yozadi
+            shutil.copyfileobj(image.file, f)  
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to save image")
 
@@ -42,7 +42,6 @@ def save_image(image: UploadFile) -> str:
 def delete_old_avatar_if_exists(avatar: str | None):
     if not avatar:
         return
-    # /static/...  -> app/static/...
     old_path = avatar.replace("/static/", "app/static/")
     if os.path.exists(old_path):
         try:
