@@ -35,3 +35,9 @@ class Lesson(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     course = relationship("Course", back_populates="lessons")
+
+    assignments = relationship(
+        "Assignment",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+    )

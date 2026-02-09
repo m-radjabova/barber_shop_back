@@ -2,7 +2,6 @@ import uuid
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -11,7 +10,7 @@ from app.core.database import Base
 class LessonProgress(Base):
     __tablename__ = "lesson_progress"
     __table_args__ = (
-        UniqueConstraint("user_id", "lesson_id", name="uq_user_lesson_progress"),
+        UniqueConstraint("user_id", "lesson_id", name="uq_lesson_progress_user_lesson"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -22,7 +21,12 @@ class LessonProgress(Base):
         nullable=False,
         index=True,
     )
-
+    course_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("courses.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     lesson_id = Column(
         UUID(as_uuid=True),
         ForeignKey("lessons.id", ondelete="CASCADE"),
@@ -30,14 +34,13 @@ class LessonProgress(Base):
         index=True,
     )
 
-    watched_sec = Column(Integer, default=0, nullable=False)
-    completed = Column(Boolean, default=False, nullable=False)
+    progress_percent = Column(Integer, default=0, nullable=False)
+    last_position_sec = Column(Integer, default=0, nullable=False)
+    is_completed = Column(Boolean, default=False, nullable=False)
+
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
     )
-
-    lesson = relationship("Lesson")
-    user = relationship("User")
