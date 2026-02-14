@@ -1,7 +1,10 @@
+import os
+import shutil
+import uuid
 from uuid import UUID
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -15,6 +18,23 @@ from app.dependencies.auth import get_current_user
 
 
 router = APIRouter(prefix="/assignments", tags=["Assignments"])
+UPLOAD_DIR = "app/static/uploads/assignments"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+ALLOWED_FILE_TYPES = {
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "text/plain": ".txt",
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "application/zip": ".zip",
+}
 
 
 def require_role(user, role: str):
@@ -34,6 +54,30 @@ def serialize_submission(submission: AssignmentSubmission) -> dict:
         "submitted_at": submission.submitted_at,
         "graded_at": submission.graded_at,
     }
+
+
+@router.post("/upload")
+def upload_assignment_file(
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    content_type = (file.content_type or "").lower()
+    ext = ALLOWED_FILE_TYPES.get(content_type)
+    if not ext:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Allowed: pdf/doc/docx/xls/xlsx/ppt/pptx/txt/jpg/png/webp/zip",
+        )
+
+    filename = f"{uuid.uuid4().hex}{ext}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    try:
+        with open(path, "wb") as dest:
+            shutil.copyfileobj(file.file, dest)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save file")
+
+    return {"file_url": f"/static/uploads/assignments/{filename}"}
 
 
 @router.post("/lessons/{lesson_id}", response_model=AssignmentOut)

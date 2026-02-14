@@ -7,3 +7,4 @@ from app.models.assignment import AssignmentSubmission
 from app.models.course_progress import LessonProgress
 from app.models.lesson_chat import LessonChatMessage
 from app.models.lesson_chat import LessonChatThread
+from app.models.course_rating import CourseRating

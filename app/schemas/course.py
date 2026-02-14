@@ -39,3 +39,14 @@ class CourseOut(CourseBase):
 
     class Config:
         from_attributes = True
+
+
+class CourseRatingUpsert(BaseModel):
+    score: int = Field(..., ge=1, le=5)
+
+
+class CourseRatingSummaryOut(BaseModel):
+    course_id: UUID
+    average_rating: float
+    ratings_count: int
+    my_rating: int | None = None

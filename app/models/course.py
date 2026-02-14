@@ -30,3 +30,4 @@ class Course(Base):
 
     category = relationship("Category", back_populates="courses")
     lessons = relationship("Lesson", back_populates="course", cascade="all, delete-orphan")
+    ratings = relationship("CourseRating", back_populates="course", cascade="all, delete-orphan")

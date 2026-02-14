@@ -4,10 +4,12 @@ import shutil
 from uuid import UUID
 
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.course import Course
 from app.models.category import Category
+from app.models.course_rating import CourseRating
 from app.schemas.course import CourseUpdate  # CourseCreate routerda Form orqali keladi
 
 
@@ -94,10 +96,30 @@ def create_course(
     return course
 
 
-def get_courses(db: Session, category_id: UUID | None = None):
+def get_courses(
+    db: Session,
+    category_id: UUID | None = None,
+    level: str | None = None,
+    search: str | None = None,
+):
     q = db.query(Course)
     if category_id:
         q = q.filter(Course.category_id == category_id)
+
+    normalized_level = level.strip().lower() if level else None
+    if normalized_level:
+        q = q.filter(func.lower(func.coalesce(Course.level, "")) == normalized_level)
+
+    normalized_search = search.strip() if search else None
+    if normalized_search:
+        like = f"%{normalized_search}%"
+        q = q.filter(
+            or_(
+                Course.title.ilike(like),
+                func.coalesce(Course.description, "").ilike(like),
+            )
+        )
+
     return q.order_by(Course.created_at.desc()).all()
 
 
@@ -142,3 +164,72 @@ def delete_course(db: Session, course_id: UUID):
     db.delete(course)
     db.commit()
     return None
+
+
+def _recalculate_course_rating(db: Session, course_id: UUID) -> tuple[float, int]:
+    avg_rating, ratings_count = (
+        db.query(
+            func.coalesce(func.avg(CourseRating.score), 0.0),
+            func.count(CourseRating.id),
+        )
+        .filter(CourseRating.course_id == course_id)
+        .one()
+    )
+    average = float(avg_rating or 0.0)
+    count = int(ratings_count or 0)
+
+    course = get_course_by_id(db, course_id)
+    if course:
+        course.rating = int(round(average)) if count > 0 else 0
+    return average, count
+
+
+def get_course_rating_summary(db: Session, course_id: UUID, user_id: UUID | None = None):
+    course = get_course_by_id(db, course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    average, ratings_count = _recalculate_course_rating(db, course_id)
+    my_rating = None
+    if user_id:
+        my_rating = (
+            db.query(CourseRating.score)
+            .filter(CourseRating.course_id == course_id, CourseRating.user_id == user_id)
+            .scalar()
+        )
+
+    db.commit()
+    return {
+        "course_id": course_id,
+        "average_rating": round(average, 2),
+        "ratings_count": ratings_count,
+        "my_rating": my_rating,
+    }
+
+
+def upsert_course_rating(db: Session, *, course_id: UUID, user_id: UUID, score: int):
+    course = get_course_by_id(db, course_id)
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    rating = (
+        db.query(CourseRating)
+        .filter(CourseRating.course_id == course_id, CourseRating.user_id == user_id)
+        .first()
+    )
+    if rating:
+        rating.score = score
+    else:
+        rating = CourseRating(course_id=course_id, user_id=user_id, score=score)
+        db.add(rating)
+
+    average, ratings_count = _recalculate_course_rating(db, course_id)
+    course.rating = int(round(average)) if ratings_count > 0 else 0
+    db.commit()
+
+    return {
+        "course_id": course_id,
+        "average_rating": round(average, 2),
+        "ratings_count": ratings_count,
+        "my_rating": score,
+    }

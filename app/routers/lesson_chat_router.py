@@ -81,8 +81,6 @@ def _serialize_thread(thread: LessonChatThread) -> dict:
 
 
 def _can_manage_message(message: LessonChatMessage, user: User) -> bool:
-    if _is_teacher_or_admin(user):
-        return True
     return message.sender_id == user.id
 
 

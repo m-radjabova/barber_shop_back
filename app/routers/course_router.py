@@ -1,17 +1,23 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from sqlalchemy.orm import Session
 from uuid import UUID
 
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
+from app.dependencies.auth import get_current_user
 from app.dependencies.roles import require_admin
 from app.models.user import User
-from app.schemas.course import CourseOut, CourseUpdate
+from app.schemas.course import (
+    CourseOut,
+    CourseRatingSummaryOut,
+    CourseRatingUpsert,
+    CourseUpdate,
+)
 from app.services import course_service
 
 router = APIRouter(prefix="/courses", tags=["Courses"])
 
 
-# ✅ CREATE: Form + File (categorydagi kabi)
 @router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 def create_course(
     category_id: UUID = Form(...),
@@ -41,9 +47,16 @@ def create_course(
 @router.get("/", response_model=list[CourseOut])
 def list_courses(
     category_id: UUID | None = None,
+    level: str | None = None,
+    search: str | None = None,
     db: Session = Depends(get_db),
 ):
-    return course_service.get_courses(db, category_id=category_id)
+    return course_service.get_courses(
+        db,
+        category_id=category_id,
+        level=level,
+        search=search,
+    )
 
 
 @router.get("/{course_id}", response_model=CourseOut)
@@ -54,7 +67,30 @@ def get_course(course_id: UUID, db: Session = Depends(get_db)):
     return course
 
 
-# ✅ UPDATE (JSON) - faqat fieldlar
+@router.get("/{course_id}/rating", response_model=CourseRatingSummaryOut)
+def get_course_rating(
+    course_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return course_service.get_course_rating_summary(db, course_id, current_user.id)
+
+
+@router.post("/{course_id}/rating", response_model=CourseRatingSummaryOut)
+def upsert_course_rating(
+    course_id: UUID,
+    payload: CourseRatingUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return course_service.upsert_course_rating(
+        db,
+        course_id=course_id,
+        user_id=current_user.id,
+        score=payload.score,
+    )
+
+
 @router.put("/{course_id}", response_model=CourseOut)
 def update_course(
     course_id: UUID,
@@ -65,7 +101,6 @@ def update_course(
     return course_service.update_course(db, course_id, payload)
 
 
-# ✅ IMAGE UPDATE (alohida)
 @router.post("/{course_id}/image", response_model=CourseOut)
 def upload_course_image(
     course_id: UUID,
