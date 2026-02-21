@@ -93,7 +93,7 @@ def create_user(db: Session, user: UserCreate):
         email=user.email,
         username=user.username,
         hashed_password=hash_password(user.password),
-        roles=["user"],
+        roles=["teacher"],
     )
     db.add(new_user)
     db.commit()

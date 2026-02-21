@@ -94,7 +94,7 @@ def google_login(data: GoogleAuthSchema, db: Session = Depends(get_db)):
             username=username,
             avatar=avatar,
             hashed_password=hash_password(uuid4().hex),
-            roles=["user"],
+            roles=["teacher"],
         )
         db.add(user)
         db.commit()
@@ -139,7 +139,7 @@ def refresh_token(data: RefreshSchema, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     access_token = create_token(
-        payload={"sub": str(user.id), "type": "access"},
+        payload={"sub": str(user.id), "type": "access", "roles": user.roles},
         expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
     )
 
