@@ -18,6 +18,18 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 def get_url():
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url
+
+    required_env_vars = ["DB_USER", "DB_PASS", "DB_HOST", "DB_PORT", "DB_NAME"]
+    missing_env_vars = [name for name in required_env_vars if not os.getenv(name)]
+    if missing_env_vars:
+        missing = ", ".join(missing_env_vars)
+        raise ValueError(
+            f"Database configuration is incomplete. Set DATABASE_URL or these env vars: {missing}"
+        )
+
     user = os.getenv("DB_USER")
     password = os.getenv("DB_PASS")
     host = os.getenv("DB_HOST")
