@@ -11,7 +11,6 @@ from app.core.security import hash_password, verify_password
 from app.services.user_service import authenticate_user, normalize_email, save_refresh_token_hash
 from app.models.user import User
 from app.dependencies.auth import get_current_user
-from app.core import firebase  
 
 from firebase_admin import auth
 
@@ -75,6 +74,8 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
 def google_login(data: GoogleAuthSchema, db: Session = Depends(get_db)):
 
     try:
+        from app.core import firebase  # noqa: F401
+
         decoded_token = auth.verify_id_token(data.id_token)
         email = normalize_email(decoded_token["email"])
         display_name = decoded_token.get("name")
