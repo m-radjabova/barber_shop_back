@@ -33,11 +33,34 @@ class BaseService:
             self.db.commit()
         except IntegrityError as exc:
             self.db.rollback()
-            raise self.bad_request("Database constraint violated") from exc
+            raise self.bad_request(self._get_constraint_message(exc)) from exc
 
     def refresh(self, instance):
         self.db.refresh(instance)
         return instance
+
+    @staticmethod
+    def _get_constraint_message(exc: IntegrityError) -> str:
+        diag = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = getattr(diag, "constraint_name", None)
+        raw_message = str(getattr(exc, "orig", exc)).lower()
+
+        if constraint_name == "uq_groups_course_name" or "uq_groups_course_name" in raw_message:
+            return "Bu kurs ichida shu nomdagi guruh allaqachon mavjud"
+
+        if constraint_name == "rooms_name_key" or "rooms_name_key" in raw_message:
+            return "Bu nomdagi xona allaqachon mavjud"
+
+        if "groups_course_id_fkey" in raw_message:
+            return "Tanlangan kurs topilmadi"
+
+        if "groups_teacher_id_fkey" in raw_message:
+            return "Tanlangan teacher topilmadi"
+
+        if "groups_room_id_fkey" in raw_message:
+            return "Tanlangan xona topilmadi"
+
+        return "Database constraint violated"
 
 
 def parse_uuid(value: str | UUID, field_name: str = "id") -> UUID:

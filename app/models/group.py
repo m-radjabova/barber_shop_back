@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, ForeignKey, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -45,5 +45,3 @@ class Group(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enrollments: Mapped[list[Enrollment]] = relationship(back_populates="group", cascade="all, delete-orphan")
     lessons: Mapped[list[Lesson]] = relationship(back_populates="group", cascade="all, delete-orphan")
     payments: Mapped[list[Payment]] = relationship(back_populates="group")
-
-    __table_args__ = (UniqueConstraint("course_id", "name", name="uq_groups_course_name"),)
