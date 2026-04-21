@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, SmallInteger, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -21,6 +21,7 @@ class Attendance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     lesson_id: Mapped[str] = mapped_column(ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False, index=True)
     enrollment_id: Mapped[str] = mapped_column(ForeignKey("enrollments.id", ondelete="CASCADE"), nullable=False, index=True)
     student_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    para: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1, server_default="1")
     status: Mapped[AttendanceStatus] = mapped_column(
         sql_enum(AttendanceStatus, "attendance_status"),
         nullable=False,
@@ -33,4 +34,4 @@ class Attendance(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enrollment: Mapped[Enrollment] = relationship(back_populates="attendance_records")
     student: Mapped[User] = relationship(back_populates="attendance_records", foreign_keys=[student_id])
 
-    __table_args__ = (UniqueConstraint("lesson_id", "student_id", name="uq_attendance_lesson_student"),)
+    __table_args__ = (UniqueConstraint("lesson_id", "student_id", "para", name="uq_attendance_lesson_student_para"),)

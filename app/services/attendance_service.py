@@ -33,7 +33,7 @@ class AttendanceService(BaseService):
             select(Attendance)
             .options(joinedload(Attendance.student).joinedload(User.student_profile))
             .where(Attendance.lesson_id == lesson.id)
-            .order_by(Attendance.created_at.asc())
+            .order_by(Attendance.para.asc(), Attendance.created_at.asc())
         )
         return list(self.db.execute(statement).scalars().unique())
 
@@ -53,10 +53,11 @@ class AttendanceService(BaseService):
             select(Attendance).where(
                 Attendance.lesson_id == lesson.id,
                 Attendance.student_id == parse_uuid(payload.student_id, "student id"),
+                Attendance.para == payload.para,
             )
         ).scalar_one_or_none()
         if existing:
-            raise self.bad_request("Attendance already saved for this student")
+            raise self.bad_request(f"Attendance already saved for this student for para {payload.para}")
         attendance = Attendance(**payload.model_dump())
         self.db.add(attendance)
         self.commit()
@@ -79,8 +80,30 @@ class AttendanceService(BaseService):
         return attendance
 
     def update_attendance(self, attendance_id: str, payload: AttendanceUpdate, current_user: User) -> Attendance:
-        self.get_attendance(attendance_id, current_user)
-        raise self.bad_request("Saved attendance cannot be changed")
+        attendance = self.get_attendance(attendance_id, current_user)
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            return attendance
+
+        next_para = update_data.get("para", attendance.para)
+        if next_para != attendance.para:
+            conflicting_attendance = self.db.execute(
+                select(Attendance).where(
+                    Attendance.lesson_id == attendance.lesson_id,
+                    Attendance.student_id == attendance.student_id,
+                    Attendance.para == next_para,
+                    Attendance.id != attendance.id,
+                )
+            ).scalar_one_or_none()
+            if conflicting_attendance:
+                raise self.bad_request(f"Attendance already saved for this student for para {next_para}")
+
+        for field, value in update_data.items():
+            setattr(attendance, field, value)
+
+        self.db.add(attendance)
+        self.commit()
+        return self.get_attendance(str(attendance.id), current_user)
 
 
 def get_attendance_service(db: Session) -> AttendanceService:

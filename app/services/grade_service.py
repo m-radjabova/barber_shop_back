@@ -88,8 +88,22 @@ class GradeService(BaseService):
         return grade
 
     def update_grade(self, grade_id: str, payload: GradeUpdate, current_user: User) -> Grade:
-        self.get_grade(grade_id, current_user)
-        raise self.bad_request("Saved grade cannot be changed")
+        grade = self.get_grade(grade_id, current_user)
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            return grade
+
+        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+            update_data["teacher_id"] = current_user.id
+
+        for field, value in update_data.items():
+            setattr(grade, field, value)
+
+        self.db.add(grade)
+        self.commit()
+        updated_grade = self.get_grade(str(grade.id), current_user)
+        TelegramService(self.db).notify_new_grade(updated_grade)
+        return updated_grade
 
 
 def get_grade_service(db: Session) -> GradeService:

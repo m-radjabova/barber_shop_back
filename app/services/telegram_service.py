@@ -92,6 +92,46 @@ class TelegramService(BaseService):
         except (InvalidOperation, ValueError, TypeError):
             return f"{score}%"
 
+    def _normalized_grade_value(self, score) -> int | None:
+        if score is None:
+            return None
+        try:
+            normalized_score = Decimal(str(score)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+            return int(normalized_score)
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    def _format_grade_stars(self, score) -> str:
+        normalized_score = self._normalized_grade_value(score)
+        if normalized_score is None:
+            return "☆☆☆☆☆"
+
+        filled_stars = max(0, min(5, (normalized_score + 19) // 20))
+        return "★" * filled_stars + "☆" * (5 - filled_stars)
+
+    def _grade_feedback(self, score) -> str:
+        normalized_score = self._normalized_grade_value(score)
+        if normalized_score is None:
+            return "Natijangiz tez orada yangilanadi."
+        if normalized_score >= 100:
+            return "Mukammal natija. Siz bugun haqiqiy chempion bo'ldingiz!"
+        if normalized_score >= 86:
+            return "Juda kuchli natija. Shu tempni ushlab tursangiz, yanada porlaysiz!"
+        if normalized_score >= 71:
+            return "Yaxshi natija. Yana biroz harakat bilan keyingi safar yanada balandroq chiqasiz."
+        if normalized_score >= 56:
+            return "Yomon emas. Bir oz ko'proq e'tibor bilan natijani sezilarli oshirish mumkin."
+        return "Hali hammasi oldinda. Ko'proq mashq qilsangiz, keyingi safar ancha kuchli natija bo'ladi."
+
+    def _format_note(self, note: str | None, fallback: str) -> str:
+        cleaned_note = (note or "").strip()
+        return cleaned_note or fallback
+
+    def _attendance_feedback(self, status: str) -> str:
+        if status == "present":
+            return "Barakalla, bugungi darsda qatnashdingiz va bu juda muhim."
+        return "Keyingi darslarni qoldirmaslikka harakat qiling, sizning ishtirokingiz muhim."
+
     def _first_name(self, user: User | None, fallback: str = "do'stim") -> str:
         if not user or not user.full_name:
             return fallback
@@ -285,8 +325,16 @@ class TelegramService(BaseService):
             "sent_at": profile.telegram_last_credentials_sent_at,
         }
 
-    def send_message(self, chat_id: str, text: str, reply_markup: dict | None = None) -> None:
+    def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        reply_markup: dict | None = None,
+        parse_mode: str | None = "Markdown",
+    ) -> None:
         payload: dict = {"chat_id": chat_id, "text": text}
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         self._post_to_telegram("sendMessage", payload)
@@ -669,14 +717,23 @@ class TelegramService(BaseService):
         ).scalar_one_or_none()
         if not lesson:
             return
+        grade_note = self._format_note(
+            grade.note,
+            "Ustoz tomonidan qo'shimcha izoh qoldirilmagan.",
+        )
         self.send_message(
             student.student_profile.telegram_chat_id,
             (
-                "📊 Yangi baho qo'yildi!\n\n"
-                f"• Guruh: {lesson.group.name}\n"
-                f"• Dars: {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
-                f"• Baho: {self._format_grade_percentage(grade.score)}\n"
-                f"• Izoh: {grade.note or 'Izoh yo`q'}"
+                "🏆⭐ *Sizning bahoyingiz yangilandi!*\n\n"
+                f"📚 *Guruh:* {lesson.group.name}\n"
+                f"📘 *Dars:* {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
+                f"📅 *Sana:* {self._format_plain_date(lesson.lesson_date)}\n\n"
+                "━━━━━━━━━━━━━━━\n"
+                f"⭐ *Sizning bahoyingiz:* {self._format_grade_percentage(grade.score)}\n"
+                f"⭐ *Yulduzli natija:* {self._format_grade_stars(grade.score)}\n"
+                f"⭐ *Fikr:* {self._grade_feedback(grade.score)}\n"
+                f"📝 *Izoh:* {grade_note}\n\n"
+                "⭐ Oldinga qarab shunday davom eting!"
             ),
             TELEGRAM_MENU_KEYBOARD,
         )
@@ -694,14 +751,19 @@ class TelegramService(BaseService):
             profile = enrollment.student.student_profile
             if not profile or not profile.telegram_chat_id:
                 continue
+            homework_note = self._format_note(
+                lesson.homework,
+                "Hozircha uyga vazifa kiritilmagan.",
+            )
             self.send_message(
                 profile.telegram_chat_id,
                 (
-                    "🆕 Yangi dars qo'shildi!\n\n"
-                    f"• Guruh: {lesson.group.name}\n"
-                    f"• Sana: {self._format_plain_date(lesson.lesson_date)}\n"
-                    f"• Mavzu: {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
-                    f"• Vazifa: {lesson.homework or 'Hozircha vazifa kiritilmagan'}"
+                    "🚀 *Yangi dars qo'shildi!*\n\n"
+                    f"📚 *Guruh:* {lesson.group.name}\n"
+                    f"📘 *Dars:* {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
+                    f"📅 *Sana:* {self._format_plain_date(lesson.lesson_date)}\n"
+                    f"📝 *Vazifa:* {homework_note}\n\n"
+                    "Tayyor bo'ling, keyingi dars sizni kutmoqda!"
                 ),
                 TELEGRAM_MENU_KEYBOARD,
             )
@@ -717,11 +779,12 @@ class TelegramService(BaseService):
         self.send_message(
             student.student_profile.telegram_chat_id,
             (
-                "💳 To'lovingiz tizimga kiritildi!\n\n"
-                f"• Guruh: {payment.group.name}\n"
-                f"• Summa: {self._format_money(payment.amount)}\n"
-                f"• Sana: {self._format_date(payment.paid_at)}\n"
-                f"• Oy: {payment.month_for.strftime('%Y-%m')}"
+                "💳 *To'lovingiz muvaffaqiyatli kiritildi!*\n\n"
+                f"📚 *Guruh:* {payment.group.name}\n"
+                f"💰 *To'langan summa:* {self._format_money(payment.amount)}\n"
+                f"📅 *To'lov sanasi:* {self._format_date(payment.paid_at)}\n"
+                f"🗓 *Qaysi oy uchun:* {payment.month_for.strftime('%Y-%m')}\n\n"
+                "To'lovingiz tizimda saqlandi. Rahmat!"
             ),
             TELEGRAM_MENU_KEYBOARD,
         )
@@ -742,15 +805,21 @@ class TelegramService(BaseService):
             return
 
         attendance_label = "Keldi" if attendance.status.value == "present" else "Kelmadi"
+        attendance_note = self._format_note(
+            attendance.note,
+            "Davomat bo'yicha qo'shimcha izoh qoldirilmagan.",
+        )
         self.send_message(
             student.student_profile.telegram_chat_id,
             (
-                "📍 Davomat yangilandi!\n\n"
-                f"• Guruh: {lesson.group.name}\n"
-                f"• Dars: {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
-                f"• Sana: {self._format_plain_date(lesson.lesson_date)}\n"
-                f"• Holat: {attendance_label}\n"
-                f"• Izoh: {attendance.note or 'Izoh yo`q'}"
+                "📍 *Sizning davomatingiz yangilandi!*\n\n"
+                f"📚 *Guruh:* {lesson.group.name}\n"
+                f"📘 *Dars:* {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
+                f"🕒 *Para:* {attendance.para}-para\n"
+                f"📅 *Sana:* {self._format_plain_date(lesson.lesson_date)}\n"
+                f"✅ *Holat:* {attendance_label}\n"
+                f"📝 *Izoh:* {attendance_note}\n\n"
+                f"{self._attendance_feedback(attendance.status.value)}"
             ),
             TELEGRAM_MENU_KEYBOARD,
         )

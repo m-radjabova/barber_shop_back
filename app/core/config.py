@@ -34,7 +34,7 @@ class Settings(BaseModel):
     TELEGRAM_BOT_USERNAME: str = os.getenv("TELEGRAM_BOT_USERNAME", "").strip()
     TELEGRAM_WEBHOOK_SECRET: str = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
     TELEGRAM_LINK_EXPIRE_MINUTES: int = _get_int_env("TELEGRAM_LINK_EXPIRE_MINUTES", 60)
-    TELEGRAM_USE_POLLING: bool = os.getenv("TELEGRAM_USE_POLLING", "true").strip().lower() in {"1", "true", "yes"}
+    TELEGRAM_USE_POLLING: bool = os.getenv("TELEGRAM_USE_POLLING", "false").strip().lower() in {"1", "true", "yes"}
     CORS_ORIGINS: list[str] = _get_list_env(
         "CORS_ORIGINS",
         [
