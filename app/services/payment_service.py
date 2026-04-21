@@ -30,14 +30,14 @@ class PaymentService(BaseService):
         student_id = parse_uuid(payload.student_id, "student id")
         group = self.db.get(Group, group_id)
         if not group:
-            raise self.bad_request("Group not found")
+            raise self.bad_request("Guruh topilmadi")
         enrollment = None
         if payload.enrollment_id:
             enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
             if not enrollment:
-                raise self.bad_request("Enrollment not found")
+                raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
             if enrollment.group_id != group_id or enrollment.student_id != student_id:
-                raise self.bad_request("Payment payload does not match enrollment")
+                raise self.bad_request("To'lov ma'lumoti ro'yxatdan o'tish ma'lumoti bilan mos kelmadi")
         payment = Payment(
             student_id=student_id,
             group_id=group_id,
@@ -62,7 +62,7 @@ class PaymentService(BaseService):
             .where(Payment.id == parse_uuid(payment_id, "payment id"))
         ).scalar_one_or_none()
         if not payment:
-            raise self.not_found("Payment")
+            raise self.not_found("To'lov")
         return payment
 
     def update_payment(self, payment_id: str, payload: PaymentUpdate) -> Payment:

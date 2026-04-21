@@ -11,13 +11,12 @@ from app.models.lesson import Lesson
 from app.models.user import User
 from app.schemas.lessons import LessonCreate, LessonUpdate
 from app.services.base import BaseService, parse_uuid
-from app.services.telegram_service import TelegramService
 
 
 class LessonService(BaseService):
     def _ensure_group_access(self, group: Group, current_user: User) -> Group:
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN) and group.teacher_id != current_user.id:
-            raise self.forbidden("You can only access your assigned groups")
+            raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlarni ko'ra olasiz")
         return group
 
     def _ensure_unique_lesson_date(
@@ -35,7 +34,7 @@ class LessonService(BaseService):
 
         existing_lesson = self.db.execute(statement).scalar_one_or_none()
         if existing_lesson:
-            raise self.bad_request("This group already has a lesson on the selected day")
+            raise self.bad_request("Bu guruh uchun tanlangan sanada dars allaqachon mavjud")
 
     def list_lessons(
         self,
@@ -50,7 +49,7 @@ class LessonService(BaseService):
         if group_id:
             group = self.db.get(Group, parse_uuid(group_id, "group id"))
             if not group:
-                raise self.not_found("Group")
+                raise self.not_found("Guruh")
             self._ensure_group_access(group, current_user)
             statement = statement.where(Lesson.group_id == group.id)
         elif current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
@@ -72,14 +71,14 @@ class LessonService(BaseService):
             .where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
         ).scalar_one_or_none()
         if not lesson:
-            raise self.not_found("Lesson")
+            raise self.not_found("Dars")
         self._ensure_group_access(lesson.group, current_user)
         return lesson
 
     def create_lesson(self, payload: LessonCreate, current_user: User) -> Lesson:
         group = self.db.get(Group, parse_uuid(payload.group_id, "group id"))
         if not group:
-            raise self.bad_request("Group not found")
+            raise self.bad_request("Guruh topilmadi")
         self._ensure_group_access(group, current_user)
         self._ensure_unique_lesson_date(str(payload.group_id), payload.lesson_date)
         data = payload.model_dump()
@@ -92,9 +91,7 @@ class LessonService(BaseService):
         lesson = Lesson(**data)
         self.db.add(lesson)
         self.commit()
-        created_lesson = self.get_lesson(str(lesson.id), current_user)
-        TelegramService(self.db).notify_new_lesson(created_lesson)
-        return created_lesson
+        return self.get_lesson(str(lesson.id), current_user)
 
     def update_lesson(self, lesson_id: str, payload: LessonUpdate, current_user: User) -> Lesson:
         lesson = self.get_lesson(lesson_id, current_user)

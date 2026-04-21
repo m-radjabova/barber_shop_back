@@ -37,7 +37,7 @@ class CourseService(BaseService):
         )
         course = self.db.execute(statement).scalar_one_or_none()
         if not course:
-            raise self.not_found("Course")
+            raise self.not_found("Kurs")
         return course
 
     def create_course(self, payload: CourseCreate) -> Course:
@@ -104,7 +104,7 @@ class RoomService(BaseService):
     def get_room(self, room_id: str) -> Room:
         room = self.db.get(Room, parse_uuid(room_id, "room id"))
         if not room:
-            raise self.not_found("Room")
+            raise self.not_found("Xona")
         return room
 
     def create_room(self, payload: RoomCreate) -> Room:

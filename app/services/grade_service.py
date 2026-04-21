@@ -19,7 +19,7 @@ class GradeService(BaseService):
             group = lesson.group if hasattr(lesson, "group") else None
             teacher_id = group.teacher_id if group else None
             if teacher_id != current_user.id:
-                raise self.forbidden("You can only access grades for your assigned groups")
+                raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlar baholarini ko'ra olasiz")
         return lesson
 
     def list_grades(
@@ -47,13 +47,13 @@ class GradeService(BaseService):
             select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(payload.lesson_id, "lesson id"))
         ).scalar_one_or_none()
         if not lesson:
-            raise self.bad_request("Lesson not found")
+            raise self.bad_request("Dars topilmadi")
         self._ensure_lesson_access(lesson, current_user)
         enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
         if not enrollment:
-            raise self.bad_request("Enrollment not found")
+            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
         if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(payload.student_id, "student id"):
-            raise self.bad_request("Grade payload does not match lesson enrollment")
+            raise self.bad_request("Baho ma'lumoti dars ro'yxati bilan mos kelmadi")
         existing = self.db.execute(
             select(Grade).where(
                 Grade.lesson_id == lesson.id,
@@ -61,7 +61,7 @@ class GradeService(BaseService):
             )
         ).scalar_one_or_none()
         if existing:
-            raise self.bad_request("Grade already saved for this student")
+            raise self.bad_request("Bu student uchun baho allaqachon saqlangan")
         data = payload.model_dump()
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
             data["teacher_id"] = current_user.id
@@ -83,7 +83,7 @@ class GradeService(BaseService):
             .where(Grade.id == parse_uuid(grade_id, "grade id"))
         ).scalar_one_or_none()
         if not grade:
-            raise self.not_found("Grade")
+            raise self.not_found("Baho")
         self._ensure_lesson_access(grade.lesson, current_user)
         return grade
 

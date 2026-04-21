@@ -19,7 +19,7 @@ class AttendanceService(BaseService):
             group = lesson.group if hasattr(lesson, "group") else None
             teacher_id = group.teacher_id if group else None
             if teacher_id != current_user.id:
-                raise self.forbidden("You can only access attendance for your assigned groups")
+                raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlar davomatini ko'ra olasiz")
         return lesson
 
     def list_attendance(self, lesson_id: str, current_user: User) -> list[Attendance]:
@@ -27,7 +27,7 @@ class AttendanceService(BaseService):
             select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
         ).scalar_one_or_none()
         if not lesson:
-            raise self.not_found("Lesson")
+            raise self.not_found("Dars")
         self._ensure_lesson_access(lesson, current_user)
         statement = (
             select(Attendance)
@@ -42,13 +42,13 @@ class AttendanceService(BaseService):
             select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(payload.lesson_id, "lesson id"))
         ).scalar_one_or_none()
         if not lesson:
-            raise self.bad_request("Lesson not found")
+            raise self.bad_request("Dars topilmadi")
         self._ensure_lesson_access(lesson, current_user)
         enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
         if not enrollment:
-            raise self.bad_request("Enrollment not found")
+            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
         if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(payload.student_id, "student id"):
-            raise self.bad_request("Attendance payload does not match lesson enrollment")
+            raise self.bad_request("Davomat ma'lumoti dars ro'yxati bilan mos kelmadi")
         existing = self.db.execute(
             select(Attendance).where(
                 Attendance.lesson_id == lesson.id,
@@ -57,7 +57,7 @@ class AttendanceService(BaseService):
             )
         ).scalar_one_or_none()
         if existing:
-            raise self.bad_request(f"Attendance already saved for this student for para {payload.para}")
+            raise self.bad_request(f"Bu student uchun {payload.para}-para davomat allaqachon saqlangan")
         attendance = Attendance(**payload.model_dump())
         self.db.add(attendance)
         self.commit()
@@ -75,7 +75,7 @@ class AttendanceService(BaseService):
             .where(Attendance.id == parse_uuid(attendance_id, "attendance id"))
         ).scalar_one_or_none()
         if not attendance:
-            raise self.not_found("Attendance")
+            raise self.not_found("Davomat")
         self._ensure_lesson_access(attendance.lesson, current_user)
         return attendance
 
@@ -96,7 +96,7 @@ class AttendanceService(BaseService):
                 )
             ).scalar_one_or_none()
             if conflicting_attendance:
-                raise self.bad_request(f"Attendance already saved for this student for para {next_para}")
+                raise self.bad_request(f"Bu student uchun {next_para}-para davomat allaqachon saqlangan")
 
         for field, value in update_data.items():
             setattr(attendance, field, value)

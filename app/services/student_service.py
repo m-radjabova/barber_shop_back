@@ -23,7 +23,7 @@ from app.services.user_service import UserService
 class StudentService(BaseService):
     def create_student(self, user_payload: UserCreate, profile_payload: StudentProfileCreate) -> User:
         if UserRole.STUDENT not in user_payload.roles:
-            raise self.bad_request("Created user must include student role")
+            raise self.bad_request("Yaratilayotgan foydalanuvchida student roli bo'lishi kerak")
 
         email = user_payload.email.strip().lower()
         UserService(self.db)._ensure_email_available(email)
@@ -32,7 +32,7 @@ class StudentService(BaseService):
         if teacher_id:
             teacher = self.db.get(User, teacher_id)
             if not teacher or UserRole.TEACHER not in teacher.roles:
-                raise self.bad_request("Created-by teacher not found")
+                raise self.bad_request("Biriktirilgan o'qituvchi topilmadi")
 
         user = User(
             full_name=user_payload.full_name.strip(),
@@ -151,7 +151,7 @@ class StudentService(BaseService):
             select(User).options(selectinload(User.student_profile)).where(User.id == parse_uuid(student_id, "student id"))
         ).scalar_one_or_none()
         if not student or UserRole.STUDENT not in student.roles:
-            raise self.bad_request("Student not found")
+            raise self.bad_request("Student topilmadi")
         return student
 
     def get_student(self, student_id: str) -> User:
@@ -160,14 +160,14 @@ class StudentService(BaseService):
     def _get_active_group(self, group_id: str) -> Group:
         group = self.db.get(Group, parse_uuid(group_id, "group id"))
         if not group:
-            raise self.bad_request("Group not found")
+            raise self.bad_request("Guruh topilmadi")
         if group.status != GroupStatus.ACTIVE:
-            raise self.bad_request("Only active groups can accept new students")
+            raise self.bad_request("Faqat faol guruhlarga yangi student qo'shish mumkin")
         return group
 
     def _ensure_group_access(self, group: Group, current_user: User) -> Group:
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN) and group.teacher_id != current_user.id:
-            raise self.forbidden("You can only access your assigned groups")
+            raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlarni ko'ra olasiz")
         return group
 
     def enroll_student(self, payload: EnrollmentCreate) -> Enrollment:
@@ -180,7 +180,7 @@ class StudentService(BaseService):
             )
         ).scalar_one_or_none()
         if existing_enrollment:
-            raise self.bad_request("Student is already assigned to this group")
+            raise self.bad_request("Student bu guruhga allaqachon biriktirilgan")
         enrollment = Enrollment(**payload.model_dump())
         self.db.add(enrollment)
         self.commit()
@@ -197,7 +197,7 @@ class StudentService(BaseService):
                 select(Enrollment.id).where(Enrollment.student_id == parse_uuid(student_id, "student id"))
             ).scalar_one_or_none()
             if has_any_enrollment:
-                raise self.bad_request("One of the selected students is already assigned to a group")
+                raise self.bad_request("Tanlangan studentlardan biri allaqachon guruhga biriktirilgan")
 
             enrollment = Enrollment(
                 student_id=student_id,
@@ -223,13 +223,13 @@ class StudentService(BaseService):
             .where(Enrollment.id == parse_uuid(enrollment_id, "enrollment id"))
         ).scalar_one_or_none()
         if not enrollment:
-            raise self.not_found("Enrollment")
+            raise self.not_found("Ro'yxatdan o'tish ma'lumoti")
         return enrollment
 
     def list_group_enrollments(self, group_id: str, current_user: User) -> list[Enrollment]:
         group = self.db.get(Group, parse_uuid(group_id, "group id"))
         if not group:
-            raise self.not_found("Group")
+            raise self.not_found("Guruh")
         self._ensure_group_access(group, current_user)
         statement = (
             select(Enrollment)
@@ -248,7 +248,7 @@ class StudentService(BaseService):
         enrollment = self.get_enrollment(enrollment_id)
         data = payload.model_dump(exclude_unset=True)
         if data.get("status") == EnrollmentStatus.LEFT and not data.get("left_at") and not enrollment.left_at:
-            raise self.bad_request("left_at is required when status is left")
+            raise self.bad_request("Status chiqarilgan bo'lsa, chiqish sanasi kiritilishi shart")
         for field, value in data.items():
             setattr(enrollment, field, value)
         self.db.add(enrollment)

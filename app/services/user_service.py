@@ -30,7 +30,7 @@ class UserService(BaseService):
             .where(User.id == parse_uuid(user_id, "user id"))
         ).scalar_one_or_none()
         if not user:
-            raise self.not_found("User")
+            raise self.not_found("Foydalanuvchi")
         return user
 
     def create_user(self, payload: UserCreate) -> User:
@@ -82,9 +82,9 @@ class UserService(BaseService):
 
     def change_password(self, user: User, current_password: str, new_password: str) -> User:
         if not verify_password(current_password, user.password_hash):
-            raise self.bad_request("Current password is incorrect")
+            raise self.bad_request("Joriy parol noto'g'ri")
         if current_password == new_password:
-            raise self.bad_request("New password must be different from current password")
+            raise self.bad_request("Yangi parol joriy paroldan farq qilishi kerak")
         user.password_hash = hash_password(new_password)
         self.db.add(user)
         self.commit()
@@ -100,9 +100,9 @@ class UserService(BaseService):
     def create_teacher_profile(self, user_id: str, payload: TeacherProfileCreate) -> TeacherProfile:
         user = self.get_user(user_id)
         if UserRole.TEACHER not in user.roles:
-            raise self.bad_request("Teacher profile can only be created for users with teacher role")
+            raise self.bad_request("O'qituvchi profili faqat o'qituvchi roli bor foydalanuvchi uchun yaratiladi")
         if user.teacher_profile:
-            raise self.bad_request("Teacher profile already exists")
+            raise self.bad_request("O'qituvchi profili allaqachon mavjud")
         profile = TeacherProfile(user_id=user.id, **payload.model_dump())
         self.db.add(profile)
         self.commit()
@@ -111,7 +111,7 @@ class UserService(BaseService):
     def update_teacher_profile(self, user_id: str, payload: TeacherProfileUpdate) -> TeacherProfile:
         user = self.get_user(user_id)
         if not user.teacher_profile:
-            raise self.not_found("Teacher profile")
+            raise self.not_found("O'qituvchi profili")
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(user.teacher_profile, field, value)
         self.db.add(user.teacher_profile)
@@ -121,14 +121,14 @@ class UserService(BaseService):
     def create_student_profile(self, user_id: str, payload: StudentProfileCreate) -> StudentProfile:
         user = self.get_user(user_id)
         if UserRole.STUDENT not in user.roles:
-            raise self.bad_request("Student profile can only be created for users with student role")
+            raise self.bad_request("Student profili faqat student roli bor foydalanuvchi uchun yaratiladi")
         if user.student_profile:
-            raise self.bad_request("Student profile already exists")
+            raise self.bad_request("Student profili allaqachon mavjud")
         teacher_id = parse_uuid(payload.created_by_teacher_id, "teacher id") if payload.created_by_teacher_id else None
         if teacher_id:
             teacher = self.db.get(User, teacher_id)
             if not teacher or UserRole.TEACHER not in teacher.roles:
-                raise self.bad_request("Created-by teacher not found")
+                raise self.bad_request("Biriktirilgan o'qituvchi topilmadi")
         profile = StudentProfile(
             user_id=user.id,
             created_by_teacher_id=teacher_id,
@@ -144,7 +144,7 @@ class UserService(BaseService):
     def update_student_profile(self, user_id: str, payload: StudentProfileUpdate) -> StudentProfile:
         user = self.get_user(user_id)
         if not user.student_profile:
-            raise self.not_found("Student profile")
+            raise self.not_found("Student profili")
         for field, value in payload.model_dump(exclude_unset=True).items():
             setattr(user.student_profile, field, value)
         self.db.add(user.student_profile)
@@ -157,7 +157,7 @@ class UserService(BaseService):
             statement = statement.where(User.id != exclude_user_id)
         existing = self.db.execute(statement).scalar_one_or_none()
         if existing:
-            raise self.bad_request("Email already taken")
+            raise self.bad_request("Bu email allaqachon band")
 
 
 def get_user_service(db: Session) -> UserService:

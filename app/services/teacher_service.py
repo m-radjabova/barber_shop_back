@@ -16,7 +16,7 @@ from app.services.user_service import UserService
 class TeacherService(BaseService):
     def create_teacher(self, user_payload: UserCreate, profile_payload: TeacherProfileCreate) -> User:
         if UserRole.TEACHER not in user_payload.roles:
-            raise self.bad_request("Created user must include teacher role")
+            raise self.bad_request("Yaratilayotgan foydalanuvchida o'qituvchi roli bo'lishi kerak")
 
         email = user_payload.email.strip().lower()
         UserService(self.db)._ensure_email_available(email)

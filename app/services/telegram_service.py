@@ -53,9 +53,9 @@ class TelegramService(BaseService):
 
     def _raise_if_disabled(self) -> None:
         if not self.token:
-            raise self.bad_request("TELEGRAM_BOT_TOKEN is not configured")
+            raise self.bad_request("TELEGRAM_BOT_TOKEN sozlanmagan")
         if not self.bot_username:
-            raise self.bad_request("TELEGRAM_BOT_USERNAME is not configured")
+            raise self.bad_request("TELEGRAM_BOT_USERNAME sozlanmagan")
 
     def _format_money(self, amount: float | int | None) -> str:
         if amount is None:
@@ -143,7 +143,7 @@ class TelegramService(BaseService):
         response.raise_for_status()
         data = response.json()
         if not data.get("ok"):
-            raise self.bad_request(data.get("description", "Telegram API request failed"))
+            raise self.bad_request(data.get("description", "Telegram API so'rovi bajarilmadi"))
         return data
 
     def _get_student_profile(self, user_id: str) -> StudentProfile:
@@ -153,7 +153,7 @@ class TelegramService(BaseService):
             .where(User.id == parse_uuid(user_id, "student id"))
         ).scalar_one_or_none()
         if not student or not student.student_profile:
-            raise self.not_found("Student profile")
+            raise self.not_found("Student profili")
         return student.student_profile
 
     def _get_student_by_chat_id(self, chat_id: str) -> User | None:
@@ -297,7 +297,7 @@ class TelegramService(BaseService):
         if not user:
             raise self.not_found("Student")
         if not profile.telegram_chat_id:
-            raise self.bad_request("Student has not linked Telegram yet")
+            raise self.bad_request("Student hali Telegramni ulmagan")
 
         temp_password = temporary_password or f"12345678"
         user.password_hash = hash_password(temp_password)
@@ -737,36 +737,6 @@ class TelegramService(BaseService):
             ),
             TELEGRAM_MENU_KEYBOARD,
         )
-
-    def notify_new_lesson(self, lesson: Lesson) -> None:
-        enrollments = list(
-            self.db.execute(
-                select(Enrollment)
-                .options(joinedload(Enrollment.student).joinedload(User.student_profile))
-                .where(Enrollment.group_id == lesson.group_id)
-                .where(Enrollment.status == EnrollmentStatus.ACTIVE)
-            ).scalars().unique()
-        )
-        for enrollment in enrollments:
-            profile = enrollment.student.student_profile
-            if not profile or not profile.telegram_chat_id:
-                continue
-            homework_note = self._format_note(
-                lesson.homework,
-                "Hozircha uyga vazifa kiritilmagan.",
-            )
-            self.send_message(
-                profile.telegram_chat_id,
-                (
-                    "🚀 *Yangi dars qo'shildi!*\n\n"
-                    f"📚 *Guruh:* {lesson.group.name}\n"
-                    f"📘 *Dars:* {lesson.topic or f'{lesson.lesson_number}-dars'}\n"
-                    f"📅 *Sana:* {self._format_plain_date(lesson.lesson_date)}\n"
-                    f"📝 *Vazifa:* {homework_note}\n\n"
-                    "Tayyor bo'ling, keyingi dars sizni kutmoqda!"
-                ),
-                TELEGRAM_MENU_KEYBOARD,
-            )
 
     def notify_new_payment(self, payment: Payment) -> None:
         student = self.db.execute(

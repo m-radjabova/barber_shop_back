@@ -18,7 +18,7 @@ class BaseService:
 
     @staticmethod
     def not_found(entity: str) -> ServiceError:
-        return ServiceError(status.HTTP_404_NOT_FOUND, f"{entity} not found")
+        return ServiceError(status.HTTP_404_NOT_FOUND, f"{entity} topilmadi")
 
     @staticmethod
     def bad_request(message: str) -> ServiceError:
@@ -60,11 +60,11 @@ class BaseService:
         if "groups_room_id_fkey" in raw_message:
             return "Tanlangan xona topilmadi"
 
-        return "Database constraint violated"
+        return "Ma'lumotlar cheklovi buzildi"
 
 
 def parse_uuid(value: str | UUID, field_name: str = "id") -> UUID:
     try:
         return UUID(str(value))
     except ValueError as exc:
-        raise ServiceError(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Invalid {field_name}") from exc
+        raise ServiceError(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{field_name} noto'g'ri") from exc

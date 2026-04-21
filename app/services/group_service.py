@@ -21,7 +21,7 @@ class GroupService(BaseService):
             self._get_group_query().where(Group.id == parse_uuid(group_id, "group id"))
         ).scalar_one_or_none()
         if not group:
-            raise self.not_found("Group")
+            raise self.not_found("Guruh")
         return group
 
     def list_groups(self, current_user: User) -> list[Group]:
@@ -36,7 +36,7 @@ class GroupService(BaseService):
     def get_group(self, group_id: str, current_user: User) -> Group:
         group = self._get_group_record(group_id)
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN) and group.teacher_id != current_user.id:
-            raise self.forbidden("You can only access your assigned groups")
+            raise self.forbidden("Siz faqat o'zingizga biriktirilgan guruhlarni ko'ra olasiz")
         return group
 
     def create_group(self, payload: GroupCreate) -> Group:
@@ -65,19 +65,19 @@ class GroupService(BaseService):
         if course_id is not None:
             course = self.db.get(Course, parse_uuid(course_id, "course id"))
             if not course:
-                raise self.bad_request("Course not found")
+                raise self.bad_request("Kurs topilmadi")
         elif not partial:
-            raise self.bad_request("Course is required")
+            raise self.bad_request("Kurs tanlanishi shart")
 
         if teacher_id is not None:
             teacher = self.db.get(User, parse_uuid(teacher_id, "teacher id"))
             if not teacher or UserRole.TEACHER not in teacher.roles:
-                raise self.bad_request("Teacher not found")
+                raise self.bad_request("O'qituvchi topilmadi")
 
         if room_id is not None:
             room = self.db.get(Room, parse_uuid(room_id, "room id"))
             if not room:
-                raise self.bad_request("Room not found")
+                raise self.bad_request("Xona topilmadi")
 
 
 def get_group_service(db: Session) -> GroupService:
