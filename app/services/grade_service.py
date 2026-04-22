@@ -14,6 +14,25 @@ from app.services.telegram_service import TelegramService
 
 
 class GradeService(BaseService):
+    @staticmethod
+    def _resolve_teacher_id(payload: GradeCreate, current_user: User):
+        if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+            return current_user.id
+        return parse_uuid(payload.teacher_id, "teacher id") if payload.teacher_id else None
+
+    @classmethod
+    def _grade_has_meaningful_changes(cls, existing: Grade, payload: GradeCreate, current_user: User) -> bool:
+        next_teacher_id = cls._resolve_teacher_id(payload, current_user)
+        next_enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")
+        return any(
+            (
+                existing.score != payload.score,
+                (existing.note or "") != (payload.note or ""),
+                existing.enrollment_id != next_enrollment_id,
+                existing.teacher_id != next_teacher_id,
+            )
+        )
+
     def _get_lesson_for_write(self, lesson_id: str, current_user: User) -> Lesson:
         lesson = self.db.execute(
             select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
@@ -171,6 +190,8 @@ class GradeService(BaseService):
 
             existing = existing_grades.get(str(payload.student_id))
             if existing:
+                if not self._grade_has_meaningful_changes(existing, payload, current_user):
+                    continue
                 existing.score = payload.score
                 existing.note = payload.note
                 existing.enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")

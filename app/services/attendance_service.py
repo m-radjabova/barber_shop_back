@@ -14,6 +14,16 @@ from app.services.telegram_service import TelegramService
 
 
 class AttendanceService(BaseService):
+    @staticmethod
+    def _attendance_has_meaningful_changes(existing: Attendance, payload: AttendanceCreate) -> bool:
+        return any(
+            (
+                existing.status != payload.status,
+                (existing.note or "") != (payload.note or ""),
+                existing.enrollment_id != parse_uuid(payload.enrollment_id, "enrollment id"),
+            )
+        )
+
     def _get_lesson_for_write(self, lesson_id: str, current_user: User) -> Lesson:
         lesson = self.db.execute(
             select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
@@ -132,6 +142,8 @@ class AttendanceService(BaseService):
 
             existing = existing_records.get((str(payload.student_id), payload.para))
             if existing:
+                if not self._attendance_has_meaningful_changes(existing, payload):
+                    continue
                 existing.status = payload.status
                 existing.note = payload.note
                 existing.enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")
