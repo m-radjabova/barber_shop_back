@@ -730,7 +730,7 @@ class TelegramService(BaseService):
                 f"📅 *Sana:* {self._format_plain_date(lesson.lesson_date)}\n\n"
                 "━━━━━━━━━━━━━━━\n"
                 f"⭐ *Sizning bahoyingiz:* {self._format_grade_percentage(grade.score)}\n"
-                f"⭐ *Yulduzli natija:* {self._format_grade_stars(grade.score)}\n"
+                f"⭐ *Natija:* {self._format_grade_stars(grade.score)}\n"
                 f"⭐ *Fikr:* {self._grade_feedback(grade.score)}\n"
                 f"📝 *Izoh:* {grade_note}\n\n"
                 "⭐ Oldinga qarab shunday davom eting!"

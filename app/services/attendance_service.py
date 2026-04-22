@@ -14,6 +14,39 @@ from app.services.telegram_service import TelegramService
 
 
 class AttendanceService(BaseService):
+    def _get_lesson_for_write(self, lesson_id: str, current_user: User) -> Lesson:
+        lesson = self.db.execute(
+            select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
+        ).scalar_one_or_none()
+        if not lesson:
+            raise self.bad_request("Dars topilmadi")
+        self._ensure_lesson_access(lesson, current_user)
+        return lesson
+
+    def _validate_enrollment(self, enrollment: Enrollment | None, lesson: Lesson, student_id: str) -> None:
+        if not enrollment:
+            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
+        if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(student_id, "student id"):
+            raise self.bad_request("Davomat ma'lumoti dars ro'yxati bilan mos kelmadi")
+
+    def _list_attendance_by_ids(self, attendance_ids: list[str]) -> list[Attendance]:
+        if not attendance_ids:
+            return []
+        attendance_uuid_ids = [parse_uuid(attendance_id, "attendance id") for attendance_id in attendance_ids]
+        statement = (
+            select(Attendance)
+            .options(
+                joinedload(Attendance.student).joinedload(User.student_profile),
+                joinedload(Attendance.lesson).joinedload(Lesson.group),
+            )
+            .where(Attendance.id.in_(attendance_uuid_ids))
+            .order_by(Attendance.para.asc(), Attendance.created_at.asc())
+        )
+        records = list(self.db.execute(statement).scalars().unique())
+        order = {attendance_id: index for index, attendance_id in enumerate(attendance_ids)}
+        records.sort(key=lambda item: order.get(str(item.id), len(order)))
+        return records
+
     def _ensure_lesson_access(self, lesson: Lesson, current_user: User) -> Lesson:
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
             group = lesson.group if hasattr(lesson, "group") else None
@@ -38,17 +71,9 @@ class AttendanceService(BaseService):
         return list(self.db.execute(statement).scalars().unique())
 
     def mark_attendance(self, payload: AttendanceCreate, current_user: User) -> Attendance:
-        lesson = self.db.execute(
-            select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(payload.lesson_id, "lesson id"))
-        ).scalar_one_or_none()
-        if not lesson:
-            raise self.bad_request("Dars topilmadi")
-        self._ensure_lesson_access(lesson, current_user)
+        lesson = self._get_lesson_for_write(str(payload.lesson_id), current_user)
         enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
-        if not enrollment:
-            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
-        if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(payload.student_id, "student id"):
-            raise self.bad_request("Davomat ma'lumoti dars ro'yxati bilan mos kelmadi")
+        self._validate_enrollment(enrollment, lesson, str(payload.student_id))
         existing = self.db.execute(
             select(Attendance).where(
                 Attendance.lesson_id == lesson.id,
@@ -64,6 +89,69 @@ class AttendanceService(BaseService):
         created_attendance = self.get_attendance(str(attendance.id), current_user)
         TelegramService(self.db).notify_new_attendance(created_attendance)
         return created_attendance
+
+    def bulk_upsert_attendance(self, payloads: list[AttendanceCreate], current_user: User) -> list[Attendance]:
+        if not payloads:
+            return []
+
+        lesson_ids = {str(payload.lesson_id) for payload in payloads}
+        if len(lesson_ids) != 1:
+            raise self.bad_request("Bulk davomat faqat bitta dars uchun yuborilishi kerak")
+
+        lesson = self._get_lesson_for_write(next(iter(lesson_ids)), current_user)
+
+        request_keys = [(str(payload.student_id), payload.para) for payload in payloads]
+        if len(request_keys) != len(set(request_keys)):
+            raise self.bad_request("Bir student va para uchun takroriy davomat yuborildi")
+
+        enrollment_ids = [parse_uuid(payload.enrollment_id, "enrollment id") for payload in payloads]
+        enrollments = {
+            str(enrollment.id): enrollment
+            for enrollment in self.db.execute(
+                select(Enrollment).where(Enrollment.id.in_(enrollment_ids))
+            ).scalars()
+        }
+
+        student_ids = [parse_uuid(payload.student_id, "student id") for payload in payloads]
+        paras = sorted({payload.para for payload in payloads})
+        existing_records = {
+            (str(record.student_id), record.para): record
+            for record in self.db.execute(
+                select(Attendance).where(
+                    Attendance.lesson_id == lesson.id,
+                    Attendance.student_id.in_(student_ids),
+                    Attendance.para.in_(paras),
+                )
+            ).scalars()
+        }
+
+        changed_ids: list[str] = []
+        for payload in payloads:
+            enrollment = enrollments.get(str(payload.enrollment_id))
+            self._validate_enrollment(enrollment, lesson, str(payload.student_id))
+
+            existing = existing_records.get((str(payload.student_id), payload.para))
+            if existing:
+                existing.status = payload.status
+                existing.note = payload.note
+                existing.enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")
+                self.db.add(existing)
+                changed_ids.append(str(existing.id))
+                continue
+
+            attendance = Attendance(**payload.model_dump())
+            self.db.add(attendance)
+            self.db.flush()
+            existing_records[(str(payload.student_id), payload.para)] = attendance
+            changed_ids.append(str(attendance.id))
+
+        self.commit()
+
+        updated_records = self._list_attendance_by_ids(changed_ids)
+        telegram_service = TelegramService(self.db)
+        for record in updated_records:
+            telegram_service.notify_new_attendance(record)
+        return updated_records
 
     def get_attendance(self, attendance_id: str, current_user: User) -> Attendance:
         attendance = self.db.execute(

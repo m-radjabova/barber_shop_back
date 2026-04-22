@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.roles import require_teacher_or_admin
 from app.models.user import User
-from app.schemas.attendance import AttendanceCreate, AttendanceResponse, AttendanceUpdate
+from app.schemas.attendance import AttendanceBulkUpsert, AttendanceCreate, AttendanceResponse, AttendanceUpdate
 from app.services.attendance_service import AttendanceService
 
 router = APIRouter(prefix="/attendance", tags=["Attendance"])
@@ -23,6 +23,15 @@ def mark_attendance(
     current_user: User = Depends(require_teacher_or_admin),
 ):
     return AttendanceService(db).mark_attendance(payload, current_user)
+
+
+@router.post("/save-many", response_model=list[AttendanceResponse], status_code=status.HTTP_201_CREATED)
+def bulk_upsert_attendance(
+    payload: AttendanceBulkUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin),
+):
+    return AttendanceService(db).bulk_upsert_attendance(payload.records, current_user)
 
 
 @router.patch("/{attendance_id}", response_model=AttendanceResponse)

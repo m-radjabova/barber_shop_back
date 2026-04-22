@@ -26,6 +26,10 @@ class GradeUpdate(ORMModel):
     note: str | None = None
 
 
+class GradeBulkUpsert(ORMModel):
+    records: list[GradeCreate] = Field(default_factory=list)
+
+
 class GradeResponse(TimestampedSchema, GradeBase):
     student: StudentDetailResponse
     teacher: TeacherDetailResponse | None = None

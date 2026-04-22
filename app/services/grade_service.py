@@ -14,6 +14,40 @@ from app.services.telegram_service import TelegramService
 
 
 class GradeService(BaseService):
+    def _get_lesson_for_write(self, lesson_id: str, current_user: User) -> Lesson:
+        lesson = self.db.execute(
+            select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(lesson_id, "lesson id"))
+        ).scalar_one_or_none()
+        if not lesson:
+            raise self.bad_request("Dars topilmadi")
+        self._ensure_lesson_access(lesson, current_user)
+        return lesson
+
+    def _validate_enrollment(self, enrollment: Enrollment | None, lesson: Lesson, student_id: str) -> None:
+        if not enrollment:
+            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
+        if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(student_id, "student id"):
+            raise self.bad_request("Baho ma'lumoti dars ro'yxati bilan mos kelmadi")
+
+    def _list_grades_by_ids(self, grade_ids: list[str]) -> list[Grade]:
+        if not grade_ids:
+            return []
+        grade_uuid_ids = [parse_uuid(grade_id, "grade id") for grade_id in grade_ids]
+        statement = (
+            select(Grade)
+            .options(
+                joinedload(Grade.student).joinedload(User.student_profile),
+                joinedload(Grade.teacher).joinedload(User.teacher_profile),
+                joinedload(Grade.lesson).joinedload(Lesson.group),
+            )
+            .where(Grade.id.in_(grade_uuid_ids))
+            .order_by(Grade.created_at.desc())
+        )
+        grades = list(self.db.execute(statement).scalars().unique())
+        order = {grade_id: index for index, grade_id in enumerate(grade_ids)}
+        grades.sort(key=lambda item: order.get(str(item.id), len(order)))
+        return grades
+
     def _ensure_lesson_access(self, lesson: Lesson, current_user: User) -> Lesson:
         if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
             group = lesson.group if hasattr(lesson, "group") else None
@@ -43,17 +77,9 @@ class GradeService(BaseService):
         return grades
 
     def give_grade(self, payload: GradeCreate, current_user: User) -> Grade:
-        lesson = self.db.execute(
-            select(Lesson).options(joinedload(Lesson.group)).where(Lesson.id == parse_uuid(payload.lesson_id, "lesson id"))
-        ).scalar_one_or_none()
-        if not lesson:
-            raise self.bad_request("Dars topilmadi")
-        self._ensure_lesson_access(lesson, current_user)
+        lesson = self._get_lesson_for_write(str(payload.lesson_id), current_user)
         enrollment = self.db.get(Enrollment, parse_uuid(payload.enrollment_id, "enrollment id"))
-        if not enrollment:
-            raise self.bad_request("Ro'yxatdan o'tish ma'lumoti topilmadi")
-        if enrollment.group_id != lesson.group_id or enrollment.student_id != parse_uuid(payload.student_id, "student id"):
-            raise self.bad_request("Baho ma'lumoti dars ro'yxati bilan mos kelmadi")
+        self._validate_enrollment(enrollment, lesson, str(payload.student_id))
         existing = self.db.execute(
             select(Grade).where(
                 Grade.lesson_id == lesson.id,
@@ -104,6 +130,74 @@ class GradeService(BaseService):
         updated_grade = self.get_grade(str(grade.id), current_user)
         TelegramService(self.db).notify_new_grade(updated_grade)
         return updated_grade
+
+    def bulk_upsert_grades(self, payloads: list[GradeCreate], current_user: User) -> list[Grade]:
+        if not payloads:
+            return []
+
+        lesson_ids = {str(payload.lesson_id) for payload in payloads}
+        if len(lesson_ids) != 1:
+            raise self.bad_request("Bulk baho faqat bitta dars uchun yuborilishi kerak")
+
+        lesson = self._get_lesson_for_write(next(iter(lesson_ids)), current_user)
+
+        student_ids_as_text = [str(payload.student_id) for payload in payloads]
+        if len(student_ids_as_text) != len(set(student_ids_as_text)):
+            raise self.bad_request("Bir student uchun takroriy baho yuborildi")
+
+        enrollment_ids = [parse_uuid(payload.enrollment_id, "enrollment id") for payload in payloads]
+        enrollments = {
+            str(enrollment.id): enrollment
+            for enrollment in self.db.execute(
+                select(Enrollment).where(Enrollment.id.in_(enrollment_ids))
+            ).scalars()
+        }
+
+        student_ids = [parse_uuid(payload.student_id, "student id") for payload in payloads]
+        existing_grades = {
+            str(grade.student_id): grade
+            for grade in self.db.execute(
+                select(Grade).where(
+                    Grade.lesson_id == lesson.id,
+                    Grade.student_id.in_(student_ids),
+                )
+            ).scalars()
+        }
+
+        changed_ids: list[str] = []
+        for payload in payloads:
+            enrollment = enrollments.get(str(payload.enrollment_id))
+            self._validate_enrollment(enrollment, lesson, str(payload.student_id))
+
+            existing = existing_grades.get(str(payload.student_id))
+            if existing:
+                existing.score = payload.score
+                existing.note = payload.note
+                existing.enrollment_id = parse_uuid(payload.enrollment_id, "enrollment id")
+                if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+                    existing.teacher_id = current_user.id
+                else:
+                    existing.teacher_id = payload.teacher_id
+                self.db.add(existing)
+                changed_ids.append(str(existing.id))
+                continue
+
+            data = payload.model_dump()
+            if current_user.has_role(UserRole.TEACHER) and not current_user.has_role(UserRole.ADMIN):
+                data["teacher_id"] = current_user.id
+            grade = Grade(**data)
+            self.db.add(grade)
+            self.db.flush()
+            existing_grades[str(payload.student_id)] = grade
+            changed_ids.append(str(grade.id))
+
+        self.commit()
+
+        updated_grades = self._list_grades_by_ids(changed_ids)
+        telegram_service = TelegramService(self.db)
+        for grade in updated_grades:
+            telegram_service.notify_new_grade(grade)
+        return updated_grades
 
 
 def get_grade_service(db: Session) -> GradeService:
