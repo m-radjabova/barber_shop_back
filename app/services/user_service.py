@@ -48,6 +48,26 @@ class UserService(BaseService):
 
         return str(self._get_default_course_center().id)
 
+    def _ensure_single_admin_per_course_center(
+        self,
+        target_roles: list[UserRole],
+        course_center_id: str,
+        exclude_user_id=None,
+    ) -> None:
+        if UserRole.ADMIN not in target_roles:
+            return
+
+        statement = select(User).where(
+            User.course_center_id == parse_uuid(course_center_id, "course center id"),
+            User.roles.contains([UserRole.ADMIN.value]),
+        )
+        if exclude_user_id is not None:
+            statement = statement.where(User.id != exclude_user_id)
+
+        existing_admin = self.db.execute(statement).scalar_one_or_none()
+        if existing_admin:
+            raise self.bad_request("Har bir course center uchun faqat bitta admin biriktirilishi mumkin")
+
     def _ensure_role_assignment_allowed(
         self,
         target_roles: list[UserRole],
@@ -87,12 +107,14 @@ class UserService(BaseService):
         email = payload.email.strip().lower()
         self._ensure_email_available(email)
         self._ensure_role_assignment_allowed(payload.roles, current_user)
+        target_course_center_id = self._resolve_target_course_center_id(payload.course_center_id, current_user)
+        self._ensure_single_admin_per_course_center(payload.roles, target_course_center_id)
         user = User(
             full_name=payload.full_name.strip(),
             phone=payload.phone,
             email=email,
             password_hash=hash_password(payload.password),
-            course_center_id=self._resolve_target_course_center_id(payload.course_center_id, current_user),
+            course_center_id=target_course_center_id,
             roles=payload.roles,
             status=payload.status,
         )
@@ -112,11 +134,18 @@ class UserService(BaseService):
         for field in ("full_name", "phone", "status"):
             if field in data:
                 setattr(user, field, data[field])
+        next_roles = data["roles"] if "roles" in data and data["roles"] is not None else user.roles
+        next_course_center_id = (
+            self._resolve_target_course_center_id(data["course_center_id"], current_user)
+            if "course_center_id" in data and data["course_center_id"] is not None
+            else str(user.course_center_id)
+        )
+        self._ensure_role_assignment_allowed(next_roles, current_user, existing_user=user)
+        self._ensure_single_admin_per_course_center(next_roles, next_course_center_id, exclude_user_id=user.id)
         if "roles" in data and data["roles"] is not None:
-            self._ensure_role_assignment_allowed(data["roles"], current_user, existing_user=user)
-            user.roles = data["roles"]
+            user.roles = next_roles
         if "course_center_id" in data and data["course_center_id"] is not None:
-            user.course_center_id = self._resolve_target_course_center_id(data["course_center_id"], current_user)
+            user.course_center_id = next_course_center_id
         self.db.add(user)
         self.commit()
         return self.get_user(str(user.id), current_user)
