@@ -32,6 +32,8 @@ def _resolve_user_from_token(token: str | None, db: Session):
     user = db.get(User, user_uuid)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User is inactive")
 
     return user
 

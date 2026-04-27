@@ -6,13 +6,13 @@ from app.models.enums import UserRole
 
 def require_roles(*allowed_roles: UserRole):
     def checker(user=Depends(get_current_user)):
-        if not user.has_any_role(*allowed_roles):
+        if user.role not in allowed_roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied")
         return user
 
     return checker
 
 
-require_super_admin = require_roles(UserRole.SUPER_ADMIN)
-require_admin = require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
-require_teacher_or_admin = require_roles(UserRole.TEACHER, UserRole.SUPER_ADMIN, UserRole.ADMIN)
+require_admin = require_roles(UserRole.ADMIN)
+require_barber = require_roles(UserRole.BARBER)
+require_admin_or_barber = require_roles(UserRole.ADMIN, UserRole.BARBER)

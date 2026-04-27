@@ -8,7 +8,7 @@ from app.core.jwt import create_token, decode_token
 from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.schemas.auth import LoginSchema
-from app.services.base import BaseService, ServiceError, parse_uuid
+from app.services.base import BaseService, ServiceError
 
 
 class AuthService(BaseService):
@@ -18,7 +18,7 @@ class AuthService(BaseService):
         user = self.db.execute(statement).scalar_one_or_none()
         if not user or not verify_password(payload.password, user.password_hash):
             raise ServiceError(401, "Invalid credentials")
-        if user.status.value != "active":
+        if not user.is_active:
             raise ServiceError(403, "User is inactive")
 
         tokens = self._build_tokens(user)
@@ -32,20 +32,21 @@ class AuthService(BaseService):
         if not payload or payload.get("type") != "refresh":
             raise ServiceError(401, "Invalid refresh token")
 
-        user_id = parse_uuid(payload.get("sub"), "refresh token subject")
+        user_id = payload.get("sub")
         user = self.db.get(User, user_id)
         if not user or not user.refresh_token_hash:
             raise ServiceError(401, "Refresh token expired")
         if not verify_password(refresh_token, user.refresh_token_hash):
             raise ServiceError(401, "Refresh token mismatch")
+        if not user.is_active:
+            raise ServiceError(403, "User is inactive")
 
         return {
             "access_token": create_token(
                 payload={
                     "sub": str(user.id),
                     "type": "access",
-                    "roles": [role.value for role in user.roles],
-                    "course_center_id": str(user.course_center_id),
+                    "role": user.role.value,
                 },
                 expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
             ),
@@ -62,8 +63,7 @@ class AuthService(BaseService):
             payload={
                 "sub": str(user.id),
                 "type": "access",
-                "roles": [role.value for role in user.roles],
-                "course_center_id": str(user.course_center_id),
+                "role": user.role.value,
             },
             expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         )

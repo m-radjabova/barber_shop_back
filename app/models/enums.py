@@ -18,41 +18,12 @@ def sql_enum(enum_cls: type[Enum], name: str) -> SAEnum:
 
 
 class UserRole(str, Enum):
-    SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
-    TEACHER = "teacher"
-    STUDENT = "student"
+    BARBER = "barber"
+    USER = "user"
 
 
-class UserStatus(str, Enum):
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-
-
-class GroupStatus(str, Enum):
-    PLANNED = "planned"
-    ACTIVE = "active"
-    FINISHED = "finished"
-    ARCHIVED = "archived"
-
-
-class EnrollmentStatus(str, Enum):
-    ACTIVE = "active"
-    LEFT = "left"
-    FINISHED = "finished"
-
-
-class AttendanceStatus(str, Enum):
-    PRESENT = "present"
-    ABSENT = "absent"
-    LATE = "late"
-
-
-class PaymentMethod(str, Enum):
-    CASH = "cash"
-    CARD = "card"
-
-
-class PaymentStatus(str, Enum):
-    PENDING = "pending"
-    PAID = "paid"
+class BookingStatus(str, Enum):
+    CONFIRMED = "confirmed"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"

@@ -38,9 +38,12 @@ class Settings(BaseModel):
     CORS_ORIGINS: list[str] = _get_list_env(
         "CORS_ORIGINS",
         [
-            "http://localhost:5173", "https://course-center-front.vercel.app"
+            "http://localhost:5173",
         ],
     )
+    IMAGEKIT_PUBLIC_KEY: str = os.getenv("IMAGEKIT_PUBLIC_KEY", "").strip()
+    IMAGEKIT_PRIVATE_KEY: str = os.getenv("IMAGEKIT_PRIVATE_KEY", "").strip()
+    IMAGEKIT_URL_ENDPOINT: str = os.getenv("IMAGEKIT_URL_ENDPOINT", "").strip().rstrip("/")
     AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes"}
 
 

@@ -1,248 +1,173 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+import uuid
+from pathlib import Path
+from uuid import UUID
 
+import requests
+from fastapi import UploadFile, status
+from sqlalchemy import select
+
+from app.core.config import settings
 from app.core.security import hash_password, verify_password
-from app.models.course_center import CourseCenter
 from app.models.enums import UserRole
-from app.models.profile import StudentProfile, TeacherProfile
 from app.models.user import User
-from app.schemas.profiles import StudentProfileCreate, StudentProfileUpdate, TeacherProfileCreate, TeacherProfileUpdate
-from app.schemas.users import CurrentUserUpdate, UserCreate, UserUpdate
-from app.services.base import BaseService, parse_uuid
+from app.schemas.user import BarberCreate, BarberUpdate, ChangePasswordSchema, UserUpdate
+from app.services.base import BaseService, ServiceError
 
 
 class UserService(BaseService):
-    def _user_options(self):
-        return (
-            selectinload(User.student_profile),
-            selectinload(User.teacher_profile),
-            selectinload(User.course_center),
-        )
+    def get_user_by_id(self, user_id: str) -> User:
+        try:
+            user_uuid = UUID(str(user_id))
+        except ValueError as exc:
+            raise self.bad_request("Foydalanuvchi id noto'g'ri") from exc
 
-    def _base_user_statement(self):
-        return select(User).options(*self._user_options())
-
-    def _get_course_center(self, course_center_id) -> CourseCenter:
-        course_center = self.db.get(CourseCenter, parse_uuid(course_center_id, "course center id"))
-        if not course_center:
-            raise self.bad_request("Course center topilmadi")
-        return course_center
-
-    def _get_default_course_center(self) -> CourseCenter:
-        course_center = self.db.execute(select(CourseCenter).order_by(CourseCenter.created_at.asc())).scalar_one_or_none()
-        if not course_center:
-            raise self.bad_request("Tizimda hech qanday course center mavjud emas")
-        return course_center
-
-    def _resolve_target_course_center_id(self, requested_course_center_id, current_user: User | None) -> str:
-        if requested_course_center_id:
-            target_course_center = self._get_course_center(requested_course_center_id)
-            if current_user and not self.is_super_admin(current_user):
-                self.ensure_same_course_center(current_user, target_course_center.id, "Course center")
-            return str(target_course_center.id)
-
-        if current_user and not self.is_super_admin(current_user):
-            return str(self.require_course_center_id(current_user))
-
-        return str(self._get_default_course_center().id)
-
-    def _ensure_single_admin_per_course_center(
-        self,
-        target_roles: list[UserRole],
-        course_center_id: str,
-        exclude_user_id=None,
-    ) -> None:
-        if UserRole.ADMIN not in target_roles:
-            return
-
-        statement = select(User).where(
-            User.course_center_id == parse_uuid(course_center_id, "course center id"),
-            User.roles.contains([UserRole.ADMIN.value]),
-        )
-        if exclude_user_id is not None:
-            statement = statement.where(User.id != exclude_user_id)
-
-        existing_admin = self.db.execute(statement).scalar_one_or_none()
-        if existing_admin:
-            raise self.bad_request("Har bir course center uchun faqat bitta admin biriktirilishi mumkin")
-
-    def _ensure_role_assignment_allowed(
-        self,
-        target_roles: list[UserRole],
-        current_user: User | None,
-        existing_user: User | None = None,
-    ) -> None:
-        if UserRole.SUPER_ADMIN in target_roles and not (current_user and self.is_super_admin(current_user)):
-            raise self.forbidden("Super admin rolini faqat super admin bera oladi")
-
-        if UserRole.ADMIN in target_roles and current_user and not self.is_super_admin(current_user):
-            raise self.forbidden("Admin rolini faqat super admin bera oladi")
-
-        if existing_user and self.is_super_admin(existing_user) and not (current_user and self.is_super_admin(current_user)):
-            raise self.forbidden("Super admin foydalanuvchini boshqarish mumkin emas")
-
-    def list_users(self, current_user: User, role: UserRole | None = None) -> list[User]:
-        statement = self._base_user_statement()
-        if role:
-            statement = statement.where(User.roles.contains([role.value]))
-        if not self.is_super_admin(current_user):
-            statement = statement.where(User.course_center_id == self.require_course_center_id(current_user))
-        statement = statement.order_by(User.created_at.desc())
-        return list(self.db.execute(statement).scalars().unique())
-
-    def get_user(self, user_id: str, current_user: User | None = None) -> User:
-        user = self.db.execute(
-            self._base_user_statement()
-            .where(User.id == parse_uuid(user_id, "user id"))
-        ).scalar_one_or_none()
+        user = self.db.get(User, user_uuid)
         if not user:
             raise self.not_found("Foydalanuvchi")
-        if current_user is not None:
-            self.ensure_same_course_center(current_user, user.course_center_id, "Foydalanuvchi")
         return user
 
-    def create_user(self, payload: UserCreate, current_user: User | None = None) -> User:
-        email = payload.email.strip().lower()
-        self._ensure_email_available(email)
-        self._ensure_role_assignment_allowed(payload.roles, current_user)
-        target_course_center_id = self._resolve_target_course_center_id(payload.course_center_id, current_user)
-        self._ensure_single_admin_per_course_center(payload.roles, target_course_center_id)
-        user = User(
-            full_name=payload.full_name.strip(),
-            phone=payload.phone,
-            email=email,
-            password_hash=hash_password(payload.password),
-            course_center_id=target_course_center_id,
-            roles=payload.roles,
-            status=payload.status,
+    def get_barber_by_id(self, barber_id: str) -> User:
+        barber = self.get_user_by_id(barber_id)
+        if barber.role != UserRole.BARBER:
+            raise self.bad_request("Bu foydalanuvchi barber emas")
+        return barber
+
+    def get_by_email(self, email: str) -> User | None:
+        statement = select(User).where(User.email == email.strip().lower())
+        return self.db.execute(statement).scalar_one_or_none()
+
+    def create_barber(self, payload: BarberCreate) -> User:
+        return self._create_user(
+            full_name=payload.full_name,
+            email=payload.email,
+            password=payload.password,
+            role=UserRole.BARBER,
         )
-        self.db.add(user)
-        self.commit()
-        return self.get_user(str(user.id), current_user if current_user else user)
 
-    def update_user(self, user_id: str, payload: UserUpdate, current_user: User) -> User:
-        user = self.get_user(user_id, current_user)
+    def create_admin(self, full_name: str, email: str, password: str) -> User:
+        return self._create_user(full_name=full_name, email=email, password=password, role=UserRole.ADMIN)
+
+    def list_barbers(self) -> list[User]:
+        statement = select(User).where(User.role == UserRole.BARBER).order_by(User.created_at.desc())
+        return list(self.db.execute(statement).scalars().all())
+
+    def update_current_user(self, current_user: User, payload: UserUpdate) -> User:
         data = payload.model_dump(exclude_unset=True)
-        if "email" in data and data["email"]:
-            email = data["email"].strip().lower()
-            self._ensure_email_available(email, exclude_user_id=user.id)
-            user.email = email
-        if "password" in data and data["password"]:
-            user.password_hash = hash_password(data.pop("password"))
-        for field in ("full_name", "phone", "status"):
-            if field in data:
-                setattr(user, field, data[field])
-        next_roles = data["roles"] if "roles" in data and data["roles"] is not None else user.roles
-        next_course_center_id = (
-            self._resolve_target_course_center_id(data["course_center_id"], current_user)
-            if "course_center_id" in data and data["course_center_id"] is not None
-            else str(user.course_center_id)
-        )
-        self._ensure_role_assignment_allowed(next_roles, current_user, existing_user=user)
-        self._ensure_single_admin_per_course_center(next_roles, next_course_center_id, exclude_user_id=user.id)
-        if "roles" in data and data["roles"] is not None:
-            user.roles = next_roles
-        if "course_center_id" in data and data["course_center_id"] is not None:
-            user.course_center_id = next_course_center_id
-        self.db.add(user)
-        self.commit()
-        return self.get_user(str(user.id), current_user)
+        if "email" in data:
+            data["email"] = data["email"].strip().lower()
+            self._ensure_email_available(data["email"], exclude_user_id=current_user.id)
 
-    def update_current_user(self, user: User, payload: CurrentUserUpdate) -> User:
+        for field, value in data.items():
+            setattr(current_user, field, value)
+
+        self.db.add(current_user)
+        self.commit()
+        return self.refresh(current_user)
+
+    def update_barber(self, barber_id: str, payload: BarberUpdate) -> User:
+        barber = self.get_barber_by_id(barber_id)
+
         data = payload.model_dump(exclude_unset=True)
-        if "email" in data and data["email"]:
-            email = data["email"].strip().lower()
-            self._ensure_email_available(email, exclude_user_id=user.id)
-            user.email = email
-        if "full_name" in data and data["full_name"] is not None:
-            user.full_name = data["full_name"].strip()
-        if "phone" in data:
-            user.phone = data["phone"]
-        self.db.add(user)
-        self.commit()
-        return self.refresh(user)
+        if "email" in data:
+            data["email"] = data["email"].strip().lower()
+            self._ensure_email_available(data["email"], exclude_user_id=barber.id)
+        if "password" in data:
+            data["password_hash"] = hash_password(data.pop("password"))
 
-    def change_password(self, user: User, current_password: str, new_password: str) -> User:
-        if not verify_password(current_password, user.password_hash):
+        for field, value in data.items():
+            setattr(barber, field, value)
+
+        self.db.add(barber)
+        self.commit()
+        return self.refresh(barber)
+
+    def change_my_password(self, current_user: User, payload: ChangePasswordSchema) -> User:
+        if not verify_password(payload.current_password, current_user.password_hash):
             raise self.bad_request("Joriy parol noto'g'ri")
-        if current_password == new_password:
-            raise self.bad_request("Yangi parol joriy paroldan farq qilishi kerak")
-        user.password_hash = hash_password(new_password)
+
+        current_user.password_hash = hash_password(payload.new_password)
+        current_user.refresh_token_hash = None
+        self.db.add(current_user)
+        self.commit()
+        return self.refresh(current_user)
+
+    def update_avatar(self, user: User, image: UploadFile) -> User:
+        if not image.content_type or not image.content_type.startswith("image/"):
+            raise ServiceError(status.HTTP_400_BAD_REQUEST, "Faqat rasm yuklash mumkin")
+
+        file_extension = self._resolve_extension(image.filename or "", image.content_type)
+        filename = f"{uuid.uuid4().hex}.{file_extension}"
+        image.file.seek(0)
+        file_bytes = image.file.read()
+
+        uploaded_url = self._upload_to_imagekit(filename, file_bytes)
+        user.avatar = uploaded_url
         self.db.add(user)
         self.commit()
         return self.refresh(user)
 
-    def reset_password(self, user_id: str, new_password: str, current_user: User) -> User:
-        user = self.get_user(user_id, current_user)
-        user.password_hash = hash_password(new_password)
+    def delete_avatar(self, user: User) -> User:
+        user.avatar = None
         self.db.add(user)
         self.commit()
-        return self.get_user(str(user.id), current_user)
+        return self.refresh(user)
 
-    def create_teacher_profile(self, user_id: str, payload: TeacherProfileCreate, current_user: User) -> TeacherProfile:
-        user = self.get_user(user_id, current_user)
-        if UserRole.TEACHER not in user.roles:
-            raise self.bad_request("O'qituvchi profili faqat o'qituvchi roli bor foydalanuvchi uchun yaratiladi")
-        if user.teacher_profile:
-            raise self.bad_request("O'qituvchi profili allaqachon mavjud")
-        profile = TeacherProfile(user_id=user.id, **payload.model_dump())
-        self.db.add(profile)
-        self.commit()
-        return self.refresh(profile)
+    def _create_user(self, full_name: str, email: str, password: str, role: UserRole) -> User:
+        normalized_email = email.strip().lower()
+        self._ensure_email_available(normalized_email)
 
-    def update_teacher_profile(self, user_id: str, payload: TeacherProfileUpdate, current_user: User) -> TeacherProfile:
-        user = self.get_user(user_id, current_user)
-        if not user.teacher_profile:
-            raise self.not_found("O'qituvchi profili")
-        for field, value in payload.model_dump(exclude_unset=True).items():
-            setattr(user.teacher_profile, field, value)
-        self.db.add(user.teacher_profile)
-        self.commit()
-        return self.refresh(user.teacher_profile)
-
-    def create_student_profile(self, user_id: str, payload: StudentProfileCreate, current_user: User) -> StudentProfile:
-        user = self.get_user(user_id, current_user)
-        if UserRole.STUDENT not in user.roles:
-            raise self.bad_request("Student profili faqat student roli bor foydalanuvchi uchun yaratiladi")
-        if user.student_profile:
-            raise self.bad_request("Student profili allaqachon mavjud")
-        teacher_id = parse_uuid(payload.created_by_teacher_id, "teacher id") if payload.created_by_teacher_id else None
-        if teacher_id:
-            teacher = self.get_user(str(teacher_id), current_user)
-            if not teacher or UserRole.TEACHER not in teacher.roles:
-                raise self.bad_request("Biriktirilgan o'qituvchi topilmadi")
-        profile = StudentProfile(
-            user_id=user.id,
-            created_by_teacher_id=teacher_id,
-            parent_name=payload.parent_name,
-            parent_phone=payload.parent_phone,
-            notes=payload.notes,
-            extra_info=payload.extra_info,
+        user = User(
+            full_name=full_name.strip(),
+            email=normalized_email,
+            password_hash=hash_password(password),
+            role=role,
         )
-        self.db.add(profile)
+        self.db.add(user)
         self.commit()
-        return self.refresh(profile)
-
-    def update_student_profile(self, user_id: str, payload: StudentProfileUpdate, current_user: User) -> StudentProfile:
-        user = self.get_user(user_id, current_user)
-        if not user.student_profile:
-            raise self.not_found("Student profili")
-        for field, value in payload.model_dump(exclude_unset=True).items():
-            setattr(user.student_profile, field, value)
-        self.db.add(user.student_profile)
-        self.commit()
-        return self.refresh(user.student_profile)
+        return self.refresh(user)
 
     def _ensure_email_available(self, email: str, exclude_user_id=None) -> None:
-        statement = select(User).where(func.lower(User.email) == email)
-        if exclude_user_id is not None:
-            statement = statement.where(User.id != exclude_user_id)
-        existing = self.db.execute(statement).scalar_one_or_none()
-        if existing:
-            raise self.bad_request("Bu email allaqachon band")
+        existing_user = self.get_by_email(email)
+        if existing_user and existing_user.id != exclude_user_id:
+            raise self.bad_request("Bu email allaqachon mavjud")
 
+    @staticmethod
+    def _resolve_extension(filename: str, content_type: str) -> str:
+        extension = Path(filename).suffix.lower().lstrip(".")
+        if extension in {"jpg", "jpeg", "png", "webp"}:
+            return "jpg" if extension == "jpeg" else extension
 
-def get_user_service(db: Session) -> UserService:
-    return UserService(db)
+        content_map = {
+            "image/jpeg": "jpg",
+            "image/png": "png",
+            "image/webp": "webp",
+        }
+        return content_map.get(content_type, "jpg")
+
+    @staticmethod
+    def _upload_to_imagekit(filename: str, file_bytes: bytes) -> str:
+        if not settings.IMAGEKIT_PRIVATE_KEY or not settings.IMAGEKIT_URL_ENDPOINT:
+            raise ServiceError(status.HTTP_500_INTERNAL_SERVER_ERROR, "ImageKit sozlanmagan")
+
+        response = requests.post(
+            "https://upload.imagekit.io/api/v1/files/upload",
+            auth=(settings.IMAGEKIT_PRIVATE_KEY, ""),
+            files={"file": (filename, file_bytes)},
+            data={
+                "fileName": filename,
+                "folder": "/barber-shop/avatars",
+                "useUniqueFileName": "true",
+            },
+            timeout=30,
+        )
+
+        if response.status_code >= 400:
+            raise ServiceError(status.HTTP_400_BAD_REQUEST, "Rasmni ImageKit'ga yuklab bo'lmadi")
+
+        payload = response.json()
+        url = payload.get("url")
+        if not url:
+            raise ServiceError(status.HTTP_400_BAD_REQUEST, "ImageKit URL qaytarmadi")
+        return url

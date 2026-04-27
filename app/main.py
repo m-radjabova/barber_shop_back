@@ -3,24 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.routers import (
-    attendance_router,
     auth_router,
-    course_centers_router,
-    courses_router,
-    grades_router,
-    groups_router,
-    lessons_router,
-    payments_router,
-    rooms_router,
-    students_router,
-    teachers_router,
-    telegram_router,
-    users_router,
+    barber_router,
+    booking_router,
+    public_booking_router,
+    user_router,
 )
 from app.services.telegram_polling import telegram_polling_runner
 
 
-app = FastAPI(title="Course Center API", version="2.0.0")
+app = FastAPI(title="Barber Shop API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -31,18 +23,10 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-app.include_router(course_centers_router)
-app.include_router(users_router)
-app.include_router(teachers_router)
-app.include_router(students_router)
-app.include_router(telegram_router)
-app.include_router(courses_router)
-app.include_router(rooms_router)
-app.include_router(groups_router)
-app.include_router(lessons_router)
-app.include_router(attendance_router)
-app.include_router(grades_router)
-app.include_router(payments_router)
+app.include_router(user_router)
+app.include_router(barber_router)
+app.include_router(public_booking_router)
+app.include_router(booking_router)
 
 
 @app.get("/health", tags=["Health"])
