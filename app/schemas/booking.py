@@ -11,6 +11,10 @@ class PublicBarberOut(ORMModel):
     id: UUID
     full_name: str
     avatar: str | None = None
+    specialty: str | None = None
+    average_rating: float = 0.0
+    reviews_count: int = 0
+    completed_bookings_count: int = 0
     is_active: bool = True
 
 
@@ -53,11 +57,19 @@ class BookingOut(TimestampedSchema):
     barber_id: UUID
     barber_name: str
     barber_avatar: str | None = None
+    barber_specialty: str | None = None
+    barber_rating: float = 0.0
+    barber_reviews_count: int = 0
     client_name: str
     client_phone: str
     appointment_date: date
     appointment_time: time
+    rating: int | None = None
     status: BookingStatus
+
+
+class BookingRatingCreate(ORMModel):
+    rating: int = Field(ge=1, le=5)
 
 
 class BookingStatusUpdate(ORMModel):

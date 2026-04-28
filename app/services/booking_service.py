@@ -5,13 +5,14 @@ import string
 from datetime import date, datetime, time, timedelta
 from uuid import UUID
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.booking import Booking
 from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
-from app.schemas.booking import BookingCreate
+from app.core.config import settings
+from app.schemas.booking import BookingCreate, BookingRatingCreate
 from app.services.base import BaseService
 
 BOOKING_OPEN_HOUR = 9
@@ -30,12 +31,15 @@ class BookingService(BaseService):
             .where(User.role == UserRole.BARBER, User.is_active.is_(True))
             .order_by(User.created_at.asc())
         )
-        return list(self.db.execute(statement).scalars().all())
+        barbers = list(self.db.execute(statement).scalars().all())
+        self._attach_barber_metrics(barbers)
+        return barbers
 
     def get_public_barber(self, barber_id: str) -> User:
         barber = self._get_barber(barber_id)
         if not barber.is_active:
             raise self.bad_request("Bu barber hozir faol emas")
+        self._attach_barber_metrics([barber])
         return barber
 
     def get_availability(self, barber_id: str, appointment_date: date) -> dict:
@@ -49,11 +53,12 @@ class BookingService(BaseService):
         slots = []
         for slot_time in self._generate_slot_times():
             key = slot_time.strftime("%H:%M")
+            is_past_slot = self._is_past_slot(appointment_date, slot_time)
             slots.append(
                 {
                     "time": key,
                     "label": self._format_time_label(slot_time),
-                    "status": "booked" if key in booked_times else "available",
+                    "status": "booked" if key in booked_times else "past" if is_past_slot else "available",
                 }
             )
 
@@ -88,7 +93,21 @@ class BookingService(BaseService):
         booking = self.db.execute(statement).scalar_one_or_none()
         if not booking:
             raise self.not_found("Booking")
+        self._attach_barber_metrics([booking.barber])
         return booking
+
+    def rate_booking_by_code(self, booking_code: str, payload: BookingRatingCreate) -> Booking:
+        booking = self.get_booking_by_code(booking_code)
+
+        if booking.status != BookingStatus.COMPLETED:
+            raise self.bad_request("Rating faqat bajarilgan booking uchun qoldiriladi")
+
+        booking.rating = payload.rating
+        self.db.add(booking)
+        self.commit()
+        refreshed = self.refresh(booking)
+        self._attach_barber_metrics([refreshed.barber])
+        return refreshed
 
     def list_bookings(
         self,
@@ -138,6 +157,7 @@ class BookingService(BaseService):
         return list(self.db.execute(statement).scalars().all())
 
     def get_barber_dashboard(self, barber: User, appointment_date: date) -> dict:
+        self._attach_barber_metrics([barber])
         bookings = self.list_barber_bookings(barber, appointment_date=appointment_date)
         completed = sum(1 for booking in bookings if booking.status == BookingStatus.COMPLETED)
         pending = sum(1 for booking in bookings if booking.status == BookingStatus.CONFIRMED)
@@ -190,6 +210,47 @@ class BookingService(BaseService):
             raise self.not_found("Barber")
         return barber
 
+    def _attach_barber_metrics(self, barbers: list[User]) -> None:
+        if not barbers:
+            return
+
+        barber_ids = [barber.id for barber in barbers]
+        metrics_statement = (
+            select(
+                Booking.barber_id,
+                func.coalesce(func.avg(Booking.rating), 0.0).label("average_rating"),
+                func.count(Booking.rating).label("reviews_count"),
+                func.coalesce(
+                    func.sum(case((Booking.status == BookingStatus.COMPLETED, 1), else_=0)),
+                    0,
+                ).label("completed_bookings_count"),
+            )
+            .where(Booking.barber_id.in_(barber_ids))
+            .group_by(Booking.barber_id)
+        )
+        rows = self.db.execute(metrics_statement).all()
+        metrics_by_barber_id = {
+            barber_id: {
+                "average_rating": round(float(average_rating or 0.0), 1),
+                "reviews_count": int(reviews_count or 0),
+                "completed_bookings_count": int(completed_bookings_count or 0),
+            }
+            for barber_id, average_rating, reviews_count, completed_bookings_count in rows
+        }
+
+        for barber in barbers:
+            metrics = metrics_by_barber_id.get(
+                barber.id,
+                {
+                    "average_rating": 0.0,
+                    "reviews_count": 0,
+                    "completed_bookings_count": 0,
+                },
+            )
+            barber._average_rating = metrics["average_rating"]
+            barber._reviews_count = metrics["reviews_count"]
+            barber._completed_bookings_count = metrics["completed_bookings_count"]
+
     def _get_bookings_for_day(self, barber_id: UUID, appointment_date: date) -> list[Booking]:
         statement = (
             select(Booking)
@@ -202,6 +263,9 @@ class BookingService(BaseService):
         return list(self.db.execute(statement).scalars().all())
 
     def _ensure_slot_available(self, barber_id: UUID, appointment_date: date, appointment_time: time) -> None:
+        if self._is_past_slot(appointment_date, appointment_time):
+            raise self.bad_request("Bu vaqt o'tib ketgan")
+
         statement = select(Booking).where(
             Booking.barber_id == barber_id,
             Booking.appointment_date == appointment_date,
@@ -213,11 +277,16 @@ class BookingService(BaseService):
             raise self.bad_request("Bu vaqt band bo'lib qoldi")
 
     def _validate_booking_datetime(self, appointment_date: date, appointment_time: time) -> None:
-        if appointment_date < date.today():
+        current_date = self._now().date()
+
+        if appointment_date < current_date:
             raise self.bad_request("O'tgan sanaga booking qilib bo'lmaydi")
 
         if appointment_time not in self._generate_slot_times():
             raise self.bad_request("Vaqt noto'g'ri tanlangan")
+
+        if self._is_past_slot(appointment_date, appointment_time):
+            raise self.bad_request("O'tib ketgan vaqtga booking qilib bo'lmaydi")
 
     def _generate_booking_code(self) -> str:
         alphabet = string.ascii_uppercase + string.digits
@@ -256,6 +325,16 @@ class BookingService(BaseService):
             slots.append(cursor.time())
             cursor += timedelta(minutes=BOOKING_SLOT_MINUTES)
         return slots
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(settings.app_timezone)
+
+    def _is_past_slot(self, appointment_date: date, appointment_time: time) -> bool:
+        now = self._now()
+        if appointment_date != now.date():
+            return False
+        return appointment_time <= now.time().replace(second=0, microsecond=0)
 
     @staticmethod
     def _parse_uuid(value: str) -> UUID:

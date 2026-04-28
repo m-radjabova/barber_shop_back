@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, time
 
-from sqlalchemy import Date, ForeignKey, String, Time
+from sqlalchemy import Date, ForeignKey, Integer, String, Time
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,6 +19,7 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     client_phone: Mapped[str] = mapped_column(String(32), nullable=False)
     appointment_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     appointment_time: Mapped[time] = mapped_column(Time, nullable=False)
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[BookingStatus] = mapped_column(
         sql_enum(BookingStatus, "booking_status"),
         nullable=False,
@@ -34,3 +35,15 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     @property
     def barber_avatar(self) -> str | None:
         return self.barber.avatar
+
+    @property
+    def barber_specialty(self) -> str | None:
+        return self.barber.specialty
+
+    @property
+    def barber_rating(self) -> float:
+        return self.barber.average_rating
+
+    @property
+    def barber_reviews_count(self) -> int:
+        return self.barber.reviews_count

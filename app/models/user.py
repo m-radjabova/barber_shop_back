@@ -18,6 +18,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(sql_enum(UserRole, "user_role"), nullable=False, default=UserRole.USER)
     avatar: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    specialty: Mapped[str | None] = mapped_column(String(255), nullable=True)
     refresh_token_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -33,3 +34,15 @@ class User(Base):
 
     def has_any_role(self, *roles: UserRole) -> bool:
         return self.role in roles
+
+    @property
+    def average_rating(self) -> float:
+        return float(getattr(self, "_average_rating", 0.0) or 0.0)
+
+    @property
+    def reviews_count(self) -> int:
+        return int(getattr(self, "_reviews_count", 0) or 0)
+
+    @property
+    def completed_bookings_count(self) -> int:
+        return int(getattr(self, "_completed_bookings_count", 0) or 0)

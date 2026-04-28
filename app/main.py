@@ -42,3 +42,4 @@ async def start_telegram_polling():
 @app.on_event("shutdown")
 async def stop_telegram_polling():
     await telegram_polling_runner.stop()
+

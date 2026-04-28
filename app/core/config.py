@@ -1,4 +1,5 @@
 import os
+from zoneinfo import ZoneInfo
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -45,6 +46,11 @@ class Settings(BaseModel):
     IMAGEKIT_PRIVATE_KEY: str = os.getenv("IMAGEKIT_PRIVATE_KEY", "").strip()
     IMAGEKIT_URL_ENDPOINT: str = os.getenv("IMAGEKIT_URL_ENDPOINT", "").strip().rstrip("/")
     AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes"}
+    APP_TIMEZONE: str = os.getenv("APP_TIMEZONE", "Asia/Tashkent").strip() or "Asia/Tashkent"
+
+    @property
+    def app_timezone(self) -> ZoneInfo:
+        return ZoneInfo(self.APP_TIMEZONE)
 
 
 settings = Settings()

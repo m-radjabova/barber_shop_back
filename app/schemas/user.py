@@ -8,6 +8,7 @@ class UserBase(ORMModel):
     full_name: str = Field(min_length=3, max_length=120)
     email: str
     avatar: str | None = None
+    specialty: str | None = Field(default=None, max_length=255)
     role: UserRole
     is_active: bool = True
 
@@ -31,6 +32,7 @@ class BarberCreate(ORMModel):
 class UserUpdate(ORMModel):
     full_name: str | None = Field(default=None, min_length=3, max_length=120)
     email: str | None = None
+    specialty: str | None = Field(default=None, max_length=255)
 
     @field_validator("email")
     @classmethod
@@ -43,6 +45,7 @@ class UserUpdate(ORMModel):
 class BarberUpdate(ORMModel):
     full_name: str | None = Field(default=None, min_length=3, max_length=120)
     email: str | None = None
+    specialty: str | None = Field(default=None, max_length=255)
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=6, max_length=128)
 

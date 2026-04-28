@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.booking import BarberAvailabilityOut, BookingCreate, BookingOut, PublicBarberOut
+from app.schemas.booking import (
+    BarberAvailabilityOut,
+    BookingCreate,
+    BookingOut,
+    BookingRatingCreate,
+    PublicBarberOut,
+)
 from app.services.booking_service import BookingService
 
 router = APIRouter(prefix="/public", tags=["Public Booking"])
@@ -32,3 +38,12 @@ def create_public_booking(payload: BookingCreate, db: Session = Depends(get_db))
 @router.get("/bookings/{booking_code}", response_model=BookingOut)
 def get_public_booking(booking_code: str, db: Session = Depends(get_db)):
     return BookingService(db).get_booking_by_code(booking_code)
+
+
+@router.post("/bookings/{booking_code}/rating", response_model=BookingOut)
+def rate_public_booking(
+    booking_code: str,
+    payload: BookingRatingCreate,
+    db: Session = Depends(get_db),
+):
+    return BookingService(db).rate_booking_by_code(booking_code, payload)

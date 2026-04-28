@@ -58,6 +58,8 @@ class UserService(BaseService):
         if "email" in data:
             data["email"] = data["email"].strip().lower()
             self._ensure_email_available(data["email"], exclude_user_id=current_user.id)
+        if "specialty" in data:
+            data["specialty"] = self._normalize_specialty(data["specialty"])
 
         for field, value in data.items():
             setattr(current_user, field, value)
@@ -73,6 +75,8 @@ class UserService(BaseService):
         if "email" in data:
             data["email"] = data["email"].strip().lower()
             self._ensure_email_available(data["email"], exclude_user_id=barber.id)
+        if "specialty" in data:
+            data["specialty"] = self._normalize_specialty(data["specialty"])
         if "password" in data:
             data["password_hash"] = hash_password(data.pop("password"))
 
@@ -132,6 +136,13 @@ class UserService(BaseService):
         existing_user = self.get_by_email(email)
         if existing_user and existing_user.id != exclude_user_id:
             raise self.bad_request("Bu email allaqachon mavjud")
+
+    @staticmethod
+    def _normalize_specialty(value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     @staticmethod
     def _resolve_extension(filename: str, content_type: str) -> str:
