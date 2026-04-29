@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import string
 from datetime import date, datetime, time, timedelta
+from math import asin, cos, radians, sin, sqrt
 from uuid import UUID
 
 from sqlalchemy import Select, case, func, or_, select
@@ -12,12 +13,13 @@ from app.models.booking import Booking
 from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
 from app.core.config import settings
-from app.schemas.booking import BookingCreate, BookingRatingCreate
+from app.schemas.booking import BookingCreate, BookingRatingCreate, CustomerBookingCreate
 from app.services.base import BaseService
+from app.services.telegram_service import TelegramService
 
 BOOKING_OPEN_HOUR = 9
 BOOKING_CLOSE_HOUR = 17
-BOOKING_LAST_SLOT_MINUTE = 30
+DEFAULT_LAST_SLOT_MINUTE = 30
 BOOKING_SLOT_MINUTES = 30
 
 
@@ -25,7 +27,14 @@ class BookingService(BaseService):
     def __init__(self, db: Session):
         super().__init__(db)
 
-    def list_public_barbers(self) -> list[User]:
+    def list_public_barbers(
+        self,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_km: float | None = None,
+        sort_by: str | None = None,
+    ) -> list[User]:
         statement = (
             select(User)
             .where(User.role == UserRole.BARBER, User.is_active.is_(True))
@@ -33,6 +42,18 @@ class BookingService(BaseService):
         )
         barbers = list(self.db.execute(statement).scalars().all())
         self._attach_barber_metrics(barbers)
+        self._attach_distance_metrics(barbers, latitude=latitude, longitude=longitude)
+        if radius_km is not None and latitude is not None and longitude is not None:
+            barbers = [
+                barber for barber in barbers
+                if barber.distance_km is not None and barber.distance_km <= radius_km
+            ]
+        if sort_by == "distance" and latitude is not None and longitude is not None:
+            barbers.sort(key=lambda barber: (barber.distance_km is None, barber.distance_km or 0, barber.full_name.lower()))
+        elif sort_by == "price_asc":
+            barbers.sort(key=lambda barber: (barber.price_from is None, barber.price_from or 0, barber.full_name.lower()))
+        elif sort_by == "price_desc":
+            barbers.sort(key=lambda barber: (barber.price_from is None, -(barber.price_from or 0), barber.full_name.lower()))
         return barbers
 
     def get_public_barber(self, barber_id: str) -> User:
@@ -51,7 +72,7 @@ class BookingService(BaseService):
         }
 
         slots = []
-        for slot_time in self._generate_slot_times():
+        for slot_time in self._generate_slot_times(barber):
             key = slot_time.strftime("%H:%M")
             is_past_slot = self._is_past_slot(appointment_date, slot_time)
             slots.append(
@@ -72,7 +93,7 @@ class BookingService(BaseService):
     def create_booking(self, payload: BookingCreate) -> Booking:
         barber = self.get_public_barber(payload.barber_id)
         appointment_time = self._parse_time(payload.appointment_time)
-        self._validate_booking_datetime(payload.appointment_date, appointment_time)
+        self._validate_booking_datetime(barber, payload.appointment_date, appointment_time)
         self._ensure_slot_available(barber.id, payload.appointment_date, appointment_time)
 
         booking = Booking(
@@ -86,7 +107,36 @@ class BookingService(BaseService):
         )
         self.db.add(booking)
         self.commit()
-        return self.refresh(booking)
+        created_booking = self.refresh(booking)
+        TelegramService(self.db).send_booking_created_notification(created_booking)
+        return created_booking
+
+    def create_customer_booking(self, current_user: User, payload: CustomerBookingCreate) -> Booking:
+        if current_user.role != UserRole.USER:
+            raise self.forbidden("Faqat foydalanuvchi navbat yaratishi mumkin")
+        if not current_user.phone_number:
+            raise self.bad_request("Profilingizda telefon raqami topilmadi")
+
+        barber = self.get_public_barber(payload.barber_id)
+        appointment_time = self._parse_time(payload.appointment_time)
+        self._validate_booking_datetime(barber, payload.appointment_date, appointment_time)
+        self._ensure_slot_available(barber.id, payload.appointment_date, appointment_time)
+
+        booking = Booking(
+            booking_code=self._generate_booking_code(),
+            barber_id=barber.id,
+            customer_id=current_user.id,
+            client_name=current_user.full_name.strip(),
+            client_phone=current_user.phone_number.strip(),
+            appointment_date=payload.appointment_date,
+            appointment_time=appointment_time,
+            status=BookingStatus.CONFIRMED,
+        )
+        self.db.add(booking)
+        self.commit()
+        created_booking = self.refresh(booking)
+        TelegramService(self.db).send_booking_created_notification(created_booking)
+        return created_booking
 
     def get_booking_by_code(self, booking_code: str) -> Booking:
         statement = select(Booking).where(Booking.booking_code == booking_code.upper())
@@ -156,6 +206,23 @@ class BookingService(BaseService):
         statement = statement.order_by(Booking.appointment_date.asc(), Booking.appointment_time.asc())
         return list(self.db.execute(statement).scalars().all())
 
+    def list_customer_bookings(
+        self,
+        customer: User,
+        *,
+        appointment_date: date | None = None,
+        status: BookingStatus | None = None,
+    ) -> list[Booking]:
+        statement: Select[tuple[Booking]] = select(Booking).where(Booking.customer_id == customer.id)
+
+        if appointment_date:
+            statement = statement.where(Booking.appointment_date == appointment_date)
+        if status:
+            statement = statement.where(Booking.status == status)
+
+        statement = statement.order_by(Booking.appointment_date.desc(), Booking.appointment_time.asc())
+        return list(self.db.execute(statement).scalars().all())
+
     def get_barber_dashboard(self, barber: User, appointment_date: date) -> dict:
         self._attach_barber_metrics([barber])
         bookings = self.list_barber_bookings(barber, appointment_date=appointment_date)
@@ -194,7 +261,9 @@ class BookingService(BaseService):
         booking.status = status
         self.db.add(booking)
         self.commit()
-        return self.refresh(booking)
+        updated_booking = self.refresh(booking)
+        TelegramService(self.db).send_booking_status_notification(updated_booking)
+        return updated_booking
 
     def get_booking_by_id(self, booking_id: str) -> Booking:
         booking_uuid = self._parse_uuid(booking_id)
@@ -250,6 +319,22 @@ class BookingService(BaseService):
             barber._average_rating = metrics["average_rating"]
             barber._reviews_count = metrics["reviews_count"]
             barber._completed_bookings_count = metrics["completed_bookings_count"]
+            barber._price_from = self._get_price_from(barber)
+
+    def _attach_distance_metrics(
+        self,
+        barbers: list[User],
+        *,
+        latitude: float | None,
+        longitude: float | None,
+    ) -> None:
+        for barber in barbers:
+            barber.distance_km = self._calculate_distance_km(
+                latitude,
+                longitude,
+                getattr(barber, "location_lat", None),
+                getattr(barber, "location_lng", None),
+            )
 
     def _get_bookings_for_day(self, barber_id: UUID, appointment_date: date) -> list[Booking]:
         statement = (
@@ -276,13 +361,13 @@ class BookingService(BaseService):
         if existing:
             raise self.bad_request("Bu vaqt band bo'lib qoldi")
 
-    def _validate_booking_datetime(self, appointment_date: date, appointment_time: time) -> None:
+    def _validate_booking_datetime(self, barber: User, appointment_date: date, appointment_time: time) -> None:
         current_date = self._now().date()
 
         if appointment_date < current_date:
             raise self.bad_request("O'tgan sanaga booking qilib bo'lmaydi")
 
-        if appointment_time not in self._generate_slot_times():
+        if appointment_time not in self._generate_slot_times(barber):
             raise self.bad_request("Vaqt noto'g'ri tanlangan")
 
         if self._is_past_slot(appointment_date, appointment_time):
@@ -317,10 +402,12 @@ class BookingService(BaseService):
         return value.strftime("%A, %B") + f" {value.day}"
 
     @staticmethod
-    def _generate_slot_times() -> list[time]:
+    def _generate_slot_times(barber: User | None = None) -> list[time]:
         slots: list[time] = []
-        cursor = datetime.combine(date.today(), time(hour=BOOKING_OPEN_HOUR, minute=0))
-        final = datetime.combine(date.today(), time(hour=BOOKING_CLOSE_HOUR, minute=BOOKING_LAST_SLOT_MINUTE))
+        start_value = getattr(barber, "work_start_time", None) or time(hour=BOOKING_OPEN_HOUR, minute=0)
+        end_value = getattr(barber, "work_end_time", None) or time(hour=BOOKING_CLOSE_HOUR, minute=DEFAULT_LAST_SLOT_MINUTE)
+        cursor = datetime.combine(date.today(), start_value)
+        final = datetime.combine(date.today(), end_value)
         while cursor <= final:
             slots.append(cursor.time())
             cursor += timedelta(minutes=BOOKING_SLOT_MINUTES)
@@ -335,6 +422,38 @@ class BookingService(BaseService):
         if appointment_date != now.date():
             return False
         return appointment_time <= now.time().replace(second=0, microsecond=0)
+
+    @staticmethod
+    def _get_price_from(barber: User) -> int | None:
+        services = getattr(barber, "services", None) or []
+        prices = []
+        for item in services:
+            if not isinstance(item, dict):
+                continue
+            if item.get("discount_price") is not None:
+                prices.append(int(item["discount_price"]))
+            elif item.get("price") is not None:
+                prices.append(int(item["price"]))
+        return min(prices) if prices else None
+
+    @staticmethod
+    def _calculate_distance_km(
+        source_lat: float | None,
+        source_lng: float | None,
+        target_lat: float | None,
+        target_lng: float | None,
+    ) -> float | None:
+        if None in {source_lat, source_lng, target_lat, target_lng}:
+            return None
+
+        radius_km = 6371.0
+        delta_lat = radians(float(target_lat) - float(source_lat))
+        delta_lng = radians(float(target_lng) - float(source_lng))
+        start_lat = radians(float(source_lat))
+        end_lat = radians(float(target_lat))
+        haversine = sin(delta_lat / 2) ** 2 + cos(start_lat) * cos(end_lat) * sin(delta_lng / 2) ** 2
+        distance = 2 * radius_km * asin(sqrt(haversine))
+        return round(distance, 2)
 
     @staticmethod
     def _parse_uuid(value: str) -> UUID:

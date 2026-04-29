@@ -15,6 +15,7 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     booking_code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False, index=True)
     barber_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     client_name: Mapped[str] = mapped_column(String(120), nullable=False)
     client_phone: Mapped[str] = mapped_column(String(32), nullable=False)
     appointment_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
@@ -26,7 +27,8 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=BookingStatus.CONFIRMED,
     )
 
-    barber = relationship("User", lazy="joined")
+    barber = relationship("User", foreign_keys=[barber_id], lazy="joined")
+    customer = relationship("User", foreign_keys=[customer_id], lazy="joined")
 
     @property
     def barber_name(self) -> str:

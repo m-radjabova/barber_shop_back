@@ -9,6 +9,39 @@ class LoginSchema(BaseModel):
     def validate_email(cls, value: str) -> str:
         return value.strip().lower()
 
+
+class CustomerAuthSchema(BaseModel):
+    full_name: str
+    phone_number: str
+    location_text: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("To'liq ism kamida 3 ta belgi bo'lishi kerak")
+        return normalized
+
+    @field_validator("phone_number")
+    @classmethod
+    def validate_phone_number(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 7:
+            raise ValueError("Telefon raqami noto'g'ri")
+        return normalized
+
+    @field_validator("location_text")
+    @classmethod
+    def validate_location_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = " ".join(value.strip().split())
+        return normalized or None
+
+
 class RefreshSchema(BaseModel):
     refresh_token: str
 

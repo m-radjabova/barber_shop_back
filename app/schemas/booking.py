@@ -5,6 +5,7 @@ from pydantic import Field, field_validator
 
 from app.models.enums import BookingStatus
 from app.schemas.common import ORMModel, TimestampedSchema
+from app.schemas.user import BarberServiceItem
 
 
 class PublicBarberOut(ORMModel):
@@ -12,10 +13,24 @@ class PublicBarberOut(ORMModel):
     full_name: str
     avatar: str | None = None
     specialty: str | None = None
+    bio: str | None = None
+    location_text: str | None = None
+    location_lat: float | None = None
+    location_lng: float | None = None
+    distance_km: float | None = None
+    work_start_time: time | None = None
+    work_end_time: time | None = None
+    services: list[BarberServiceItem] = Field(default_factory=list)
+    price_from: int | None = None
     average_rating: float = 0.0
     reviews_count: int = 0
     completed_bookings_count: int = 0
     is_active: bool = True
+
+    @field_validator("services", mode="before")
+    @classmethod
+    def normalize_services(cls, value):
+        return value or []
 
 
 class AvailabilitySlotOut(ORMModel):
@@ -52,9 +67,16 @@ class BookingCreate(ORMModel):
         return normalized
 
 
+class CustomerBookingCreate(ORMModel):
+    barber_id: str
+    appointment_date: date
+    appointment_time: str
+
+
 class BookingOut(TimestampedSchema):
     booking_code: str
     barber_id: UUID
+    customer_id: UUID | None = None
     barber_name: str
     barber_avatar: str | None = None
     barber_specialty: str | None = None

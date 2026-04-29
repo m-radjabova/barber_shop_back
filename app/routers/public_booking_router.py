@@ -1,5 +1,7 @@
 from datetime import date
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
@@ -17,8 +19,19 @@ router = APIRouter(prefix="/public", tags=["Public Booking"])
 
 
 @router.get("/barbers", response_model=list[PublicBarberOut])
-def list_public_barbers(db: Session = Depends(get_db)):
-    return BookingService(db).list_public_barbers()
+def list_public_barbers(
+    lat: float | None = Query(default=None, ge=-90, le=90),
+    lng: float | None = Query(default=None, ge=-180, le=180),
+    radius_km: float | None = Query(default=None, gt=0, le=100),
+    sort_by: Literal["distance", "price_asc", "price_desc"] | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    return BookingService(db).list_public_barbers(
+        latitude=lat,
+        longitude=lng,
+        radius_km=radius_km,
+        sort_by=sort_by,
+    )
 
 
 @router.get("/barbers/{barber_id}/availability", response_model=BarberAvailabilityOut)

@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.dependencies.roles import require_admin, require_admin_or_barber, require_barber
-from app.models.enums import BookingStatus
+from app.dependencies.auth import get_current_user
+from app.dependencies.roles import require_admin, require_admin_or_barber, require_barber, require_user
+from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
-from app.schemas.booking import BarberDashboardOut, BookingOut, BookingStatusUpdate
+from app.schemas.booking import BarberDashboardOut, BookingOut, BookingStatusUpdate, CustomerBookingCreate
 from app.services.booking_service import BookingService
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -30,18 +31,36 @@ def list_bookings(
     )
 
 
+@router.post("/", response_model=BookingOut)
+def create_my_booking(
+    payload: CustomerBookingCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    return BookingService(db).create_customer_booking(current_user, payload)
+
+
 @router.get("/me", response_model=list[BookingOut])
 def list_my_bookings(
     date_value: date | None = Query(default=None, alias="date"),
     status: BookingStatus | None = None,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_barber),
+    current_user: User = Depends(get_current_user),
 ):
-    return BookingService(db).list_barber_bookings(
-        current_user,
-        appointment_date=date_value,
-        status=status,
-    )
+    service = BookingService(db)
+    if current_user.role == UserRole.BARBER:
+        return service.list_barber_bookings(
+            current_user,
+            appointment_date=date_value,
+            status=status,
+        )
+    if current_user.role == UserRole.USER:
+        return service.list_customer_bookings(
+            current_user,
+            appointment_date=date_value,
+            status=status,
+        )
+    return []
 
 
 @router.get("/dashboard", response_model=BarberDashboardOut)
