@@ -17,6 +17,7 @@ class TelegramPollingRunner:
         self._task: asyncio.Task | None = None
         self._stopped = asyncio.Event()
         self._offset = 0
+        self._conflict_logged = False
 
     def should_run(self) -> bool:
         return bool(settings.TELEGRAM_USE_POLLING and settings.TELEGRAM_BOT_TOKEN)
@@ -39,8 +40,10 @@ class TelegramPollingRunner:
         self._task = None
 
     async def _run(self) -> None:
-        api_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}/getUpdates"
+        base_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}"
+        api_url = f"{base_url}/getUpdates"
         async with httpx.AsyncClient(timeout=35.0) as client:
+            await self._delete_webhook(client, base_url)
             while not self._stopped.is_set():
                 try:
                     response = await client.get(
@@ -48,6 +51,7 @@ class TelegramPollingRunner:
                         params={"timeout": 25, "offset": self._offset},
                     )
                     response.raise_for_status()
+                    self._conflict_logged = False
                     payload = response.json()
                     for update in payload.get("result", []):
                         update_id = update.get("update_id")
@@ -56,9 +60,28 @@ class TelegramPollingRunner:
                         await asyncio.to_thread(self._process_update, update)
                 except asyncio.CancelledError:
                     raise
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 409:
+                        if not self._conflict_logged:
+                            logger.warning(
+                                "Telegram polling conflict (409). Another bot instance or webhook is using this token. "
+                                "Polling will retry quietly every 30 seconds."
+                            )
+                            self._conflict_logged = True
+                        await asyncio.sleep(30)
+                        continue
+                    logger.exception("Telegram polling failed: %s", exc)
+                    await asyncio.sleep(3)
                 except Exception as exc:
                     logger.exception("Telegram polling failed: %s", exc)
                     await asyncio.sleep(3)
+
+    async def _delete_webhook(self, client: httpx.AsyncClient, base_url: str) -> None:
+        try:
+            response = await client.get(f"{base_url}/deleteWebhook", params={"drop_pending_updates": False})
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("Telegram webhook cleanup failed before polling start: %s", exc)
 
     @staticmethod
     def _process_update(update: dict) -> None:
