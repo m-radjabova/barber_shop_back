@@ -236,6 +236,7 @@ class TelegramService(BaseService):
             existing_chat_owner.telegram_marketing_enabled = False
             existing_chat_owner.telegram_connected_at = None
             self.db.add(existing_chat_owner)
+            self.db.flush()
 
         user.telegram_chat_id = chat_id
         user.telegram_notifications_enabled = True

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class TelegramPollingRunner:
     def __init__(self):
         self._task: asyncio.Task | None = None
-        self._stopped = asyncio.Event()
+        self._stopped: asyncio.Event | None = None
         self._offset = 0
         self._conflict_logged = False
 
@@ -24,12 +24,18 @@ class TelegramPollingRunner:
 
     async def start(self) -> None:
         if not self.should_run() or self._task is not None:
+            if not self.should_run():
+                logger.info("Telegram polling is disabled or bot token is not configured.")
             return
+        self._stopped = asyncio.Event()
         self._stopped.clear()
         self._task = asyncio.create_task(self._run(), name="telegram-polling-runner")
+        self._task.add_done_callback(self._handle_task_done)
+        logger.info("Telegram polling started.")
 
     async def stop(self) -> None:
-        self._stopped.set()
+        if self._stopped:
+            self._stopped.set()
         if self._task is None:
             return
         self._task.cancel()
@@ -38,13 +44,15 @@ class TelegramPollingRunner:
         except asyncio.CancelledError:
             pass
         self._task = None
+        self._stopped = None
+        logger.info("Telegram polling stopped.")
 
     async def _run(self) -> None:
         base_url = f"https://api.telegram.org/bot{settings.TELEGRAM_BOT_TOKEN}"
         api_url = f"{base_url}/getUpdates"
         async with httpx.AsyncClient(timeout=35.0) as client:
             await self._delete_webhook(client, base_url)
-            while not self._stopped.is_set():
+            while self._stopped and not self._stopped.is_set():
                 try:
                     response = await client.get(
                         api_url,
@@ -75,6 +83,18 @@ class TelegramPollingRunner:
                 except Exception as exc:
                     logger.exception("Telegram polling failed: %s", exc)
                     await asyncio.sleep(3)
+
+    def _handle_task_done(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("Telegram polling task stopped unexpectedly.")
+        finally:
+            if self._task is task:
+                self._task = None
+                self._stopped = None
 
     async def _delete_webhook(self, client: httpx.AsyncClient, base_url: str) -> None:
         try:
