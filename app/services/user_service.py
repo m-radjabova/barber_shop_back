@@ -119,6 +119,11 @@ class UserService(BaseService):
         self.commit()
         return self.refresh(barber)
 
+    def delete_barber(self, barber_id: str) -> None:
+        barber = self.get_barber_by_id(barber_id)
+        self.db.delete(barber)
+        self.commit()
+
     def change_my_password(self, current_user: User, payload: ChangePasswordSchema) -> User:
         if not verify_password(payload.current_password, current_user.password_hash):
             raise self.bad_request("Joriy parol noto'g'ri")

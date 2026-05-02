@@ -37,6 +37,15 @@ def update_barber(
     return UserService(db).update_barber(barber_id, payload)
 
 
+@router.delete("/{barber_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_barber(
+    barber_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    UserService(db).delete_barber(barber_id)
+
+
 @router.post("/{barber_id}/avatar", response_model=UserOut)
 def upload_barber_avatar(
     barber_id: str,
