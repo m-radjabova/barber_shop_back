@@ -6,6 +6,7 @@ from app.routers import (
     auth_router,
     barber_router,
     booking_router,
+    booking_ws_router,
     public_booking_router,
     telegram_router,
     user_router,
@@ -27,6 +28,7 @@ app.include_router(user_router)
 app.include_router(barber_router)
 app.include_router(public_booking_router)
 app.include_router(booking_router)
+app.include_router(booking_ws_router)
 app.include_router(telegram_router)
 
 

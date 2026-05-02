@@ -100,8 +100,10 @@ class BookingStatusUpdate(ORMModel):
 
 class BarberDashboardStatsOut(ORMModel):
     total: int
+    confirmed: int
     completed: int
     pending: int
+    cancelled: int
     completion_ratio: float
 
 

@@ -80,3 +80,12 @@ def update_booking_status(
     current_user: User = Depends(require_admin_or_barber),
 ):
     return BookingService(db).update_booking_status(booking_id, current_user, payload.status)
+
+
+@router.patch("/{booking_id}/cancel", response_model=BookingOut)
+def cancel_my_booking(
+    booking_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_user),
+):
+    return BookingService(db).cancel_customer_booking(booking_id, current_user)

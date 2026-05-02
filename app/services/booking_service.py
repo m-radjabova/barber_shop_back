@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timedelta
 from math import asin, cos, radians, sin, sqrt
 from uuid import UUID
 
+import anyio
 from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.models.user import User
 from app.core.config import settings
 from app.schemas.booking import BookingCreate, BookingRatingCreate, CustomerBookingCreate
 from app.services.base import BaseService
+from app.services.booking_ws import barber_booking_ws_manager, customer_booking_ws_manager
 from app.services.telegram_service import TelegramService
 
 BOOKING_OPEN_HOUR = 9
@@ -103,12 +105,13 @@ class BookingService(BaseService):
             client_phone=payload.client_phone.strip(),
             appointment_date=payload.appointment_date,
             appointment_time=appointment_time,
-            status=BookingStatus.CONFIRMED,
+            status=BookingStatus.PENDING,
         )
         self.db.add(booking)
         self.commit()
         created_booking = self.refresh(booking)
         TelegramService(self.db).send_booking_created_notification(created_booking)
+        self._notify_booking_created(created_booking)
         return created_booking
 
     def create_customer_booking(self, current_user: User, payload: CustomerBookingCreate) -> Booking:
@@ -130,12 +133,13 @@ class BookingService(BaseService):
             client_phone=current_user.phone_number.strip(),
             appointment_date=payload.appointment_date,
             appointment_time=appointment_time,
-            status=BookingStatus.CONFIRMED,
+            status=BookingStatus.PENDING,
         )
         self.db.add(booking)
         self.commit()
         created_booking = self.refresh(booking)
         TelegramService(self.db).send_booking_created_notification(created_booking)
+        self._notify_booking_created(created_booking)
         return created_booking
 
     def get_booking_by_code(self, booking_code: str) -> Booking:
@@ -227,11 +231,14 @@ class BookingService(BaseService):
         self._attach_barber_metrics([barber])
         bookings = self.list_barber_bookings(barber, appointment_date=appointment_date)
         completed = sum(1 for booking in bookings if booking.status == BookingStatus.COMPLETED)
-        pending = sum(1 for booking in bookings if booking.status == BookingStatus.CONFIRMED)
+        confirmed = sum(1 for booking in bookings if booking.status == BookingStatus.CONFIRMED)
+        pending = sum(1 for booking in bookings if booking.status == BookingStatus.PENDING)
+        cancelled = sum(1 for booking in bookings if booking.status == BookingStatus.CANCELLED)
         total = len(bookings)
         next_booking = next((booking for booking in bookings if booking.status == BookingStatus.CONFIRMED), None)
 
-        completion_ratio = round((completed / total), 4) if total else 0.0
+        active_total = completed + confirmed + pending
+        completion_ratio = round((completed / active_total), 4) if active_total else 0.0
 
         return {
             "barber": barber,
@@ -239,8 +246,10 @@ class BookingService(BaseService):
             "display_date": self._format_display_date(appointment_date),
             "stats": {
                 "total": total,
+                "confirmed": confirmed,
                 "completed": completed,
                 "pending": pending,
+                "cancelled": cancelled,
                 "completion_ratio": completion_ratio,
             },
             "next_booking": next_booking,
@@ -253,16 +262,34 @@ class BookingService(BaseService):
         if current_user.role == UserRole.BARBER and booking.barber_id != current_user.id:
             raise self.forbidden("Bu booking sizga tegishli emas")
 
-        if status == BookingStatus.COMPLETED and booking.status == BookingStatus.CANCELLED:
-            raise self.bad_request("Cancelled booking'ni completed qilib bo'lmaydi")
-        if status == BookingStatus.CANCELLED and booking.status == BookingStatus.COMPLETED:
-            raise self.bad_request("Completed booking'ni cancelled qilib bo'lmaydi")
+        self._validate_status_transition(booking.status, status)
 
         booking.status = status
         self.db.add(booking)
         self.commit()
         updated_booking = self.refresh(booking)
         TelegramService(self.db).send_booking_status_notification(updated_booking)
+        self._notify_booking_status_updated(updated_booking)
+        return updated_booking
+
+    def cancel_customer_booking(self, booking_id: str, current_user: User) -> Booking:
+        if current_user.role != UserRole.USER:
+            raise self.forbidden("Faqat foydalanuvchi o'z bronini bekor qilishi mumkin")
+
+        booking = self.get_booking_by_id(booking_id)
+        if booking.customer_id != current_user.id:
+            raise self.forbidden("Bu booking sizga tegishli emas")
+        if booking.status == BookingStatus.CANCELLED:
+            return booking
+        if booking.status == BookingStatus.COMPLETED:
+            raise self.bad_request("Bu bookingni bekor qilib bo'lmaydi")
+
+        booking.status = BookingStatus.CANCELLED
+        self.db.add(booking)
+        self.commit()
+        updated_booking = self.refresh(booking)
+        TelegramService(self.db).send_booking_status_notification(updated_booking)
+        self._notify_booking_status_updated(updated_booking)
         return updated_booking
 
     def get_booking_by_id(self, booking_id: str) -> Booking:
@@ -271,6 +298,19 @@ class BookingService(BaseService):
         if not booking:
             raise self.not_found("Booking")
         return booking
+
+    def _validate_status_transition(self, current_status: BookingStatus, next_status: BookingStatus) -> None:
+        if current_status == next_status:
+            return
+        if current_status in {BookingStatus.COMPLETED, BookingStatus.CANCELLED}:
+            raise self.bad_request("Yakunlangan yoki bekor qilingan booking holatini o'zgartirib bo'lmaydi")
+
+        allowed_transitions = {
+            BookingStatus.PENDING: {BookingStatus.CONFIRMED, BookingStatus.CANCELLED},
+            BookingStatus.CONFIRMED: {BookingStatus.COMPLETED, BookingStatus.CANCELLED},
+        }
+        if next_status not in allowed_transitions.get(current_status, set()):
+            raise self.bad_request("Booking holatini bunday o'zgartirib bo'lmaydi")
 
     def _get_barber(self, barber_id: str) -> User:
         barber_uuid = self._parse_uuid(barber_id)
@@ -461,3 +501,25 @@ class BookingService(BaseService):
             return UUID(str(value))
         except ValueError as exc:
             raise BaseService.bad_request("Id noto'g'ri") from exc
+
+    @staticmethod
+    def _notify_booking_created(booking: Booking) -> None:
+        try:
+            anyio.from_thread.run(barber_booking_ws_manager.broadcast_booking_created, booking)
+        except Exception:
+            pass
+        try:
+            anyio.from_thread.run(customer_booking_ws_manager.broadcast_booking_created, booking)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _notify_booking_status_updated(booking: Booking) -> None:
+        try:
+            anyio.from_thread.run(barber_booking_ws_manager.broadcast_booking_status_updated, booking)
+        except Exception:
+            pass
+        try:
+            anyio.from_thread.run(customer_booking_ws_manager.broadcast_booking_status_updated, booking)
+        except Exception:
+            pass

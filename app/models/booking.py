@@ -24,7 +24,7 @@ class Booking(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[BookingStatus] = mapped_column(
         sql_enum(BookingStatus, "booking_status"),
         nullable=False,
-        default=BookingStatus.CONFIRMED,
+        default=BookingStatus.PENDING,
     )
 
     barber = relationship("User", foreign_keys=[barber_id], lazy="joined")

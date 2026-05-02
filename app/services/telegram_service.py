@@ -105,6 +105,7 @@ class TelegramService(BaseService):
             return False
 
         status_label = {
+            BookingStatus.PENDING: "⏳ Barber tasdiqlashi kutilmoqda",
             BookingStatus.CONFIRMED: "✅ Tasdiqlandi",
             BookingStatus.COMPLETED: "🏁 Yakunlandi",
             BookingStatus.CANCELLED: "❌ Bekor qilindi",
