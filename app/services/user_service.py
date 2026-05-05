@@ -18,6 +18,8 @@ from app.services.telegram_service import TelegramService
 
 
 class UserService(BaseService):
+    MAX_GALLERY_IMAGES = 12
+
     def get_user_by_id(self, user_id: str) -> User:
         try:
             user_uuid = UUID(str(user_id))
@@ -135,15 +137,7 @@ class UserService(BaseService):
         return self.refresh(current_user)
 
     def update_avatar(self, user: User, image: UploadFile) -> User:
-        if not image.content_type or not image.content_type.startswith("image/"):
-            raise ServiceError(status.HTTP_400_BAD_REQUEST, "Faqat rasm yuklash mumkin")
-
-        file_extension = self._resolve_extension(image.filename or "", image.content_type)
-        filename = f"{uuid.uuid4().hex}.{file_extension}"
-        image.file.seek(0)
-        file_bytes = image.file.read()
-
-        uploaded_url = self._upload_to_imagekit(filename, file_bytes)
+        uploaded_url = self._upload_image(image, folder="/barber-shop/avatars")
         user.avatar = uploaded_url
         self.db.add(user)
         self.commit()
@@ -151,6 +145,34 @@ class UserService(BaseService):
 
     def delete_avatar(self, user: User) -> User:
         user.avatar = None
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
+
+    def add_gallery_image(self, user: User, image: UploadFile) -> User:
+        if user.role != UserRole.BARBER:
+            raise ServiceError(status.HTTP_403_FORBIDDEN, "Faqat barber galereya yuklashi mumkin")
+
+        current_images = list(user.gallery_images or [])
+        if len(current_images) >= self.MAX_GALLERY_IMAGES:
+            raise ServiceError(status.HTTP_400_BAD_REQUEST, "Galereyada ko'pi bilan 12 ta rasm bo'lishi mumkin")
+
+        uploaded_url = self._upload_image(image, folder="/barber-shop/gallery")
+        user.gallery_images = [*current_images, uploaded_url]
+        self.db.add(user)
+        self.commit()
+        return self.refresh(user)
+
+    def delete_gallery_image(self, user: User, image_index: int) -> User:
+        if user.role != UserRole.BARBER:
+            raise ServiceError(status.HTTP_403_FORBIDDEN, "Faqat barber galereyani o'zgartirishi mumkin")
+
+        current_images = list(user.gallery_images or [])
+        if image_index < 0 or image_index >= len(current_images):
+            raise ServiceError(status.HTTP_404_NOT_FOUND, "Rasm topilmadi")
+
+        current_images.pop(image_index)
+        user.gallery_images = current_images
         self.db.add(user)
         self.commit()
         return self.refresh(user)
@@ -260,8 +282,19 @@ class UserService(BaseService):
         }
         return content_map.get(content_type, "jpg")
 
+    def _upload_image(self, image: UploadFile, *, folder: str) -> str:
+        if not image.content_type or not image.content_type.startswith("image/"):
+            raise ServiceError(status.HTTP_400_BAD_REQUEST, "Faqat rasm yuklash mumkin")
+
+        file_extension = self._resolve_extension(image.filename or "", image.content_type)
+        filename = f"{uuid.uuid4().hex}.{file_extension}"
+        image.file.seek(0)
+        file_bytes = image.file.read()
+
+        return self._upload_to_imagekit(filename, file_bytes, folder=folder)
+
     @staticmethod
-    def _upload_to_imagekit(filename: str, file_bytes: bytes) -> str:
+    def _upload_to_imagekit(filename: str, file_bytes: bytes, *, folder: str) -> str:
         if not settings.IMAGEKIT_PRIVATE_KEY or not settings.IMAGEKIT_URL_ENDPOINT:
             raise ServiceError(status.HTTP_500_INTERNAL_SERVER_ERROR, "ImageKit sozlanmagan")
 
@@ -271,7 +304,7 @@ class UserService(BaseService):
             files={"file": (filename, file_bytes)},
             data={
                 "fileName": filename,
-                "folder": "/barber-shop/avatars",
+                "folder": folder,
                 "useUniqueFileName": "true",
             },
             timeout=30,

@@ -20,6 +20,7 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(sql_enum(UserRole, "user_role"), nullable=False, default=UserRole.USER)
     avatar: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gallery_images: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     specialty: Mapped[str | None] = mapped_column(String(255), nullable=True)
     bio: Mapped[str | None] = mapped_column(String(1200), nullable=True)
     location_text: Mapped[str | None] = mapped_column(String(255), nullable=True)

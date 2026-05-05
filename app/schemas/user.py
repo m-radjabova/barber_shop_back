@@ -13,6 +13,7 @@ class UserBase(ORMModel):
     email: str
     phone_number: str | None = Field(default=None, min_length=7, max_length=32)
     avatar: str | None = None
+    gallery_images: list[str] = Field(default_factory=list)
     specialty: str | None = Field(default=None, max_length=255)
     bio: str | None = Field(default=None, max_length=1200)
     location_text: str | None = Field(default=None, max_length=255)
@@ -35,6 +36,11 @@ class UserBase(ORMModel):
     @field_validator("services", mode="before")
     @classmethod
     def normalize_services(cls, value):
+        return value or []
+
+    @field_validator("gallery_images", mode="before")
+    @classmethod
+    def normalize_gallery_images(cls, value):
         return value or []
 
 

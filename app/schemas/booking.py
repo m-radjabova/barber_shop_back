@@ -12,6 +12,7 @@ class PublicBarberOut(ORMModel):
     id: UUID
     full_name: str
     avatar: str | None = None
+    gallery_images: list[str] = Field(default_factory=list)
     specialty: str | None = None
     bio: str | None = None
     location_text: str | None = None
@@ -30,6 +31,11 @@ class PublicBarberOut(ORMModel):
     @field_validator("services", mode="before")
     @classmethod
     def normalize_services(cls, value):
+        return value or []
+
+    @field_validator("gallery_images", mode="before")
+    @classmethod
+    def normalize_gallery_images(cls, value):
         return value or []
 
 

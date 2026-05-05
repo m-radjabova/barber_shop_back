@@ -48,3 +48,21 @@ def delete_my_avatar(
     current_user: User = Depends(get_current_user),
 ):
     return UserService(db).delete_avatar(current_user)
+
+
+@router.post("/me/gallery", response_model=UserOut)
+def upload_my_gallery_image(
+    image: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return UserService(db).add_gallery_image(current_user, image)
+
+
+@router.delete("/me/gallery/{image_index}", response_model=UserOut)
+def delete_my_gallery_image(
+    image_index: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return UserService(db).delete_gallery_image(current_user, image_index)
