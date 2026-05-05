@@ -73,6 +73,11 @@ class CustomerBookingCreate(ORMModel):
     appointment_time: str
 
 
+class BarberBlockCreate(ORMModel):
+    appointment_date: date
+    appointment_time: str
+
+
 class BookingOut(TimestampedSchema):
     booking_code: str
     barber_id: UUID
@@ -104,6 +109,7 @@ class BarberDashboardStatsOut(ORMModel):
     completed: int
     pending: int
     cancelled: int
+    blocked: int
     completion_ratio: float
 
 

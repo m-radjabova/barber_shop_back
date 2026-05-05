@@ -26,5 +26,6 @@ class UserRole(str, Enum):
 class BookingStatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
+    BLOCKED = "blocked"
     COMPLETED = "completed"
     CANCELLED = "cancelled"

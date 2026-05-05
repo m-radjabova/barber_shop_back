@@ -14,7 +14,12 @@ from app.models.booking import Booking
 from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
 from app.core.config import settings
-from app.schemas.booking import BookingCreate, BookingRatingCreate, CustomerBookingCreate
+from app.schemas.booking import (
+    BarberBlockCreate,
+    BookingCreate,
+    BookingRatingCreate,
+    CustomerBookingCreate,
+)
 from app.services.base import BaseService
 from app.services.booking_ws import barber_booking_ws_manager, customer_booking_ws_manager
 from app.services.telegram_service import TelegramService
@@ -153,6 +158,27 @@ class BookingService(BaseService):
         self._notify_booking_created(created_booking)
         return created_booking
 
+    def create_barber_block(self, barber: User, payload: BarberBlockCreate) -> Booking:
+        appointment_time = self._parse_time(payload.appointment_time)
+        self._validate_booking_datetime(barber, payload.appointment_date, appointment_time)
+        self._ensure_slot_available(barber.id, payload.appointment_date, appointment_time)
+
+        booking = Booking(
+            booking_code=self._generate_booking_code(),
+            barber_id=barber.id,
+            customer_id=None,
+            client_name="Band vaqt",
+            client_phone=(barber.phone_number or ""),
+            appointment_date=payload.appointment_date,
+            appointment_time=appointment_time,
+            status=BookingStatus.BLOCKED,
+        )
+        self.db.add(booking)
+        self.commit()
+        created_booking = self.refresh(booking)
+        self._notify_booking_created(created_booking)
+        return created_booking
+
     def get_booking_by_code(self, booking_code: str) -> Booking:
         statement = select(Booking).where(Booking.booking_code == booking_code.upper())
         booking = self.db.execute(statement).scalar_one_or_none()
@@ -245,7 +271,8 @@ class BookingService(BaseService):
         confirmed = sum(1 for booking in bookings if booking.status == BookingStatus.CONFIRMED)
         pending = sum(1 for booking in bookings if booking.status == BookingStatus.PENDING)
         cancelled = sum(1 for booking in bookings if booking.status == BookingStatus.CANCELLED)
-        total = len(bookings)
+        blocked = sum(1 for booking in bookings if booking.status == BookingStatus.BLOCKED)
+        total = completed + confirmed + pending
         next_booking = next((booking for booking in bookings if booking.status == BookingStatus.CONFIRMED), None)
 
         active_total = completed + confirmed + pending
@@ -261,6 +288,7 @@ class BookingService(BaseService):
                 "completed": completed,
                 "pending": pending,
                 "cancelled": cancelled,
+                "blocked": blocked,
                 "completion_ratio": completion_ratio,
             },
             "next_booking": next_booking,
@@ -319,6 +347,7 @@ class BookingService(BaseService):
         allowed_transitions = {
             BookingStatus.PENDING: {BookingStatus.CONFIRMED, BookingStatus.CANCELLED},
             BookingStatus.CONFIRMED: {BookingStatus.COMPLETED, BookingStatus.CANCELLED},
+            BookingStatus.BLOCKED: {BookingStatus.CANCELLED},
         }
         if next_status not in allowed_transitions.get(current_status, set()):
             raise self.bad_request("Booking holatini bunday o'zgartirib bo'lmaydi")

@@ -8,7 +8,13 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.roles import require_admin, require_admin_or_barber, require_barber, require_user
 from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
-from app.schemas.booking import BarberDashboardOut, BookingOut, BookingStatusUpdate, CustomerBookingCreate
+from app.schemas.booking import (
+    BarberBlockCreate,
+    BarberDashboardOut,
+    BookingOut,
+    BookingStatusUpdate,
+    CustomerBookingCreate,
+)
 from app.services.booking_service import BookingService
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
@@ -70,6 +76,15 @@ def get_my_dashboard(
     current_user: User = Depends(require_barber),
 ):
     return BookingService(db).get_barber_dashboard(current_user, date_value)
+
+
+@router.post("/block", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
+def block_my_time(
+    payload: BarberBlockCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_barber),
+):
+    return BookingService(db).create_barber_block(current_user, payload)
 
 
 @router.patch("/{booking_id}/status", response_model=BookingOut)
