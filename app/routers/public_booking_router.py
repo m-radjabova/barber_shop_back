@@ -24,6 +24,8 @@ def list_public_barbers(
     lng: float | None = Query(default=None, ge=-180, le=180),
     radius_km: float | None = Query(default=None, gt=0, le=100),
     sort_by: Literal["distance", "price_asc", "price_desc"] | None = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     return BookingService(db).list_public_barbers(
@@ -31,6 +33,8 @@ def list_public_barbers(
         longitude=lng,
         radius_km=radius_km,
         sort_by=sort_by,
+        limit=limit,
+        offset=offset,
     )
 
 

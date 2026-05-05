@@ -10,7 +10,7 @@ from app.core.jwt import create_token, decode_token
 from app.core.security import hash_password, verify_password
 from app.models.enums import UserRole
 from app.models.user import User
-from app.schemas.auth import CustomerAuthSchema, LoginSchema
+from app.schemas.auth import CustomerLoginSchema, CustomerRegisterSchema, LoginSchema
 from app.services.base import BaseService, ServiceError
 
 
@@ -30,28 +30,47 @@ class AuthService(BaseService):
         self.commit()
         return tokens
 
-    def login_or_register_customer(self, payload: CustomerAuthSchema) -> dict:
+    def login_customer(self, payload: CustomerLoginSchema) -> dict:
         normalized_phone = self._normalize_phone_number(payload.phone_number)
         statement = select(User).where(
             User.phone_number == normalized_phone,
             User.role == UserRole.USER,
         )
         user = self.db.execute(statement).scalar_one_or_none()
-
         if user is None:
-            user = User(
-                full_name=payload.full_name.strip(),
-                email=self._build_customer_email(normalized_phone),
-                phone_number=normalized_phone,
-                password_hash=hash_password(secrets.token_urlsafe(24)),
-                role=UserRole.USER,
-                is_active=True,
-            )
-        else:
-            user.full_name = payload.full_name.strip()
+            raise ServiceError(404, "Bu telefon raqami ro'yxatdan o'tmagan")
+        if not user.is_active:
+            raise ServiceError(403, "User is inactive")
+
         user.location_text = self._normalize_short_text(payload.location_text)
         user.location_lat, user.location_lng = self._normalize_location(payload.location_lat, payload.location_lng)
 
+        return self._issue_customer_tokens(user)
+
+    def register_customer(self, payload: CustomerRegisterSchema) -> dict:
+        normalized_phone = self._normalize_phone_number(payload.phone_number)
+        statement = select(User).where(User.phone_number == normalized_phone)
+        user = self.db.execute(statement).scalar_one_or_none()
+        if user is not None:
+            raise ServiceError(409, "Bu telefon raqami allaqachon ro'yxatdan o'tgan")
+
+        user = User(
+            full_name=payload.full_name.strip(),
+            email=self._build_customer_email(normalized_phone),
+            phone_number=normalized_phone,
+            password_hash=hash_password(secrets.token_urlsafe(24)),
+            role=UserRole.USER,
+            is_active=True,
+            location_text=self._normalize_short_text(payload.location_text),
+        )
+        user.location_lat, user.location_lng = self._normalize_location(payload.location_lat, payload.location_lng)
+
+        return self._issue_customer_tokens(user)
+
+    def login_or_register_customer(self, payload: CustomerRegisterSchema) -> dict:
+        return self.register_customer(payload)
+
+    def _issue_customer_tokens(self, user: User) -> dict:
         if not user.is_active:
             raise ServiceError(403, "User is inactive")
 

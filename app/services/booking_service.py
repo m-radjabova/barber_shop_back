@@ -36,12 +36,23 @@ class BookingService(BaseService):
         longitude: float | None = None,
         radius_km: float | None = None,
         sort_by: str | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[User]:
         statement = (
             select(User)
             .where(User.role == UserRole.BARBER, User.is_active.is_(True))
             .order_by(User.created_at.asc())
         )
+
+        if sort_by is None and radius_km is None:
+            barbers = list(
+                self.db.execute(statement.offset(offset).limit(limit)).scalars().all()
+            )
+            self._attach_barber_metrics(barbers)
+            self._attach_distance_metrics(barbers, latitude=latitude, longitude=longitude)
+            return barbers
+
         barbers = list(self.db.execute(statement).scalars().all())
         self._attach_barber_metrics(barbers)
         self._attach_distance_metrics(barbers, latitude=latitude, longitude=longitude)
@@ -56,7 +67,7 @@ class BookingService(BaseService):
             barbers.sort(key=lambda barber: (barber.price_from is None, barber.price_from or 0, barber.full_name.lower()))
         elif sort_by == "price_desc":
             barbers.sort(key=lambda barber: (barber.price_from is None, -(barber.price_from or 0), barber.full_name.lower()))
-        return barbers
+        return barbers[offset:offset + limit]
 
     def get_public_barber(self, barber_id: str) -> User:
         barber = self._get_barber(barber_id)

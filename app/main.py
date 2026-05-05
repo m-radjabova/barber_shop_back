@@ -15,6 +15,8 @@ from app.services.telegram_polling import telegram_polling_runner
 
 app = FastAPI(title="Barber Shop API", version="2.0.0")
 
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
