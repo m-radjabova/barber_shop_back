@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.routers import (
     auth_router,
+    barber_application_router,
     barber_router,
     booking_router,
     booking_ws_router,
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(barber_router)
+app.include_router(barber_application_router)
 app.include_router(public_booking_router)
 app.include_router(booking_router)
 app.include_router(booking_ws_router)

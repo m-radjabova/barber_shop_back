@@ -23,6 +23,12 @@ class UserRole(str, Enum):
     USER = "user"
 
 
+class BarberApplicationStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class BookingStatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"

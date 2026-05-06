@@ -217,6 +217,32 @@ class TelegramService(BaseService):
             logger.warning("Telegram sendMessage failed: %s", exc)
             return False
 
+    def send_barber_application_approved(self, user: User, *, login_email: str, password: str) -> bool:
+        if not user.telegram_chat_id:
+            return False
+
+        text = (
+            "🎉 <b>Barber arizangiz tasdiqlandi</b>\n\n"
+            f"👤 <b>Ism:</b> {user.full_name}\n"
+            f"📧 <b>Login:</b> {login_email}\n"
+            f"🔐 <b>Parol:</b> {password}\n\n"
+            "💈 Endi barber kabinetiga kirishingiz mumkin.\n"
+            "⚠️ Xavfsizlik uchun tizimga kirgach parolni almashtiring."
+        )
+        return self.send_message(user.telegram_chat_id, text)
+
+    def send_barber_application_rejected(self, user: User, *, admin_note: str) -> bool:
+        if not user.telegram_chat_id:
+            return False
+
+        text = (
+            "ℹ️ <b>Barber arizangiz ko‘rib chiqildi</b>\n\n"
+            "Hozircha ariza tasdiqlanmadi.\n"
+            f"📝 <b>Izoh:</b> {admin_note}\n\n"
+            "Kerakli ma'lumotlarni to‘g‘rilab, arizani qayta yuborishingiz mumkin."
+        )
+        return self.send_message(user.telegram_chat_id, text)
+
     def _issue_link_token(self, user: User) -> None:
         user.telegram_link_token = secrets.token_urlsafe(24)
         user.telegram_link_expires_at = datetime.now(settings.app_timezone) + timedelta(

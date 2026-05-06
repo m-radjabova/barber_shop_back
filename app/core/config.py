@@ -47,6 +47,11 @@ class Settings(BaseModel):
     IMAGEKIT_PUBLIC_KEY: str = os.getenv("IMAGEKIT_PUBLIC_KEY", "").strip()
     IMAGEKIT_PRIVATE_KEY: str = os.getenv("IMAGEKIT_PRIVATE_KEY", "").strip()
     IMAGEKIT_URL_ENDPOINT: str = os.getenv("IMAGEKIT_URL_ENDPOINT", "").strip().rstrip("/")
+    BARBER_APPLICATION_CARD_NUMBER: str = os.getenv(
+        "BARBER_APPLICATION_CARD_NUMBER",
+        "8600 0000 0000 0000",
+    ).strip()
+    BARBER_APPLICATION_PAYMENT_AMOUNT: int = _get_int_env("BARBER_APPLICATION_PAYMENT_AMOUNT", 15000)
     AUTO_CREATE_TABLES: bool = os.getenv("AUTO_CREATE_TABLES", "").strip().lower() in {"1", "true", "yes"}
     APP_TIMEZONE: str = os.getenv("APP_TIMEZONE", "Asia/Tashkent").strip() or "Asia/Tashkent"
 
